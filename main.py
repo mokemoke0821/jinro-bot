@@ -28,7 +28,16 @@ async def load_extensions():
         'cogs.game_management',
         'cogs.night_actions',
         'cogs.day_actions',
-        'cogs.voting'
+        'cogs.voting',
+        'cogs.admin',
+        'cogs.stats',
+        'cogs.feedback',
+        'cogs.rules_manager',
+        'cogs.role_composer',
+        'cogs.community',        # コミュニティ提案システム
+        'cogs.balance',          # ゲームバランス調整システム
+        'cogs.documentation',    # ドキュメント管理
+        'utils.role_balancer'
     ]
     
     for cog in cogs:

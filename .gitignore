@@ -1,11 +1,50 @@
+# Python関連
 __pycache__/
-*.pyc
-*.pyo
-*.pyd
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# 環境変数
 .env
-.venv/
-env/
-venv/
-ENV/
-.vscode/
+
+# データベース
+*.db
+*.sqlite3
+
+# ログ
+logs/
 *.log
+
+# バックアップ
+*.bak
+
+# 仮想環境
+venv/
+env/
+ENV/
+
+# IDEの設定
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS固有
+.DS_Store
+Thumbs.db
