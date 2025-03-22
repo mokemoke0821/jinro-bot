@@ -18,6 +18,24 @@ try:
 except ImportError:
     print("WARNING: Could not load discord_error_patch module")
 
+# さらに強力なメッセージフィルタリングを適用
+try:
+    import discord
+    from utils.message_filter import apply_message_filter
+    filter_result = apply_message_filter()
+    print(f"Message filter applied: {filter_result}")
+except Exception as e:
+    print(f"WARNING: Could not apply message filter: {e}")
+
+# 最強のパッチを適用
+try:
+    # モンキーパッチを適用（Discord.pyの読み込み前）
+    import monkey_patch
+    monkey_patch.apply_monkey_patches()
+    print("Monkey patches applied")
+except Exception as e:
+    print(f"WARNING: Could not apply monkey patches: {e}")
+
 # その他のモジュールをインポート
 import asyncio
 import discord

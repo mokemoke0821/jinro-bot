@@ -141,11 +141,15 @@ class RoleComposerCog(commands.Cog):
     @commands.has_permissions(administrator=True)
     async def apply_preset(self, ctx, preset_id: str):
         """プリセット構成を適用"""
-        # プリセットの存在確認
-        if preset_id not in self.presets:
-            preset_names = ", ".join(f"`{pid}`" for pid in self.presets.keys())
-            await ctx.send(f"プリセット `{preset_id}` は存在しません。有効なプリセット: {preset_names}")
-            return
+        try:
+            # エラーを抑制するフラグを設定
+            ctx.suppress_errors = True
+            
+            # プリセットの存在確認
+            if preset_id not in self.presets:
+                preset_names = ", ".join(f"`{pid}`" for pid in self.presets.keys())
+                await ctx.send(f"プリセット `{preset_id}` は存在しません。有効なプリセット: {preset_names}")
+                return
         
         # 一時的な応答メッセージ - 後で編集できるよう保存
         temp_msg = await ctx.send(f"プリセット `{preset_id}` を適用中...")
