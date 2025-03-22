@@ -154,7 +154,8 @@ async def on_command_error(ctx, error):
         await ctx.send(embed=embed)
     else:
         # ログに詳細なエラー情報を記録
-        print(f"[ERROR_HANDLER] Command error in '{ctx.command}' if ctx.command else 'unknown command'}: {error}")
+        command_name = ctx.command.qualified_name if ctx.command else 'unknown command'
+        print(f"[ERROR_HANDLER] Command error in '{command_name}': {error}")
         
         # 一般的なエラーメッセージ
         embed = discord.Embed(
