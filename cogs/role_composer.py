@@ -14,7 +14,12 @@ class RoleComposerCog(commands.Cog):
     
     def __init__(self, bot):
         self.bot = bot
+        
+        # 直接_load_presetsを呼び出して結果を保存
+        print("[DEBUG] Initializing RoleComposerCog")
         self.presets = self._load_presets()
+        print(f"[DEBUG] Presets loaded: {type(self.presets)}")
+        print(f"[DEBUG] Presets keys: {list(self.presets.keys())}")
         
         # 追加のエラー処理 - リスナーは別メソッドとして追加
         self._setup_error_handlers()
@@ -33,9 +38,11 @@ class RoleComposerCog(commands.Cog):
             # リスナー登録エラーはログだけに出力
             print(f"[COMPOSE] Error handler setup failed: {e}")
     
+    # 非同期から同期関数に変更 - 単なる静的データなので非同期にする必要はない
     def _load_presets(self):
-        """プリセット役職構成をロード"""
-        return {
+        """プリセット役職構成をロード - 静的データなので非同期である必要はない"""
+        # ハードコーディングされたプリセット情報を返す
+        presets = {
             "standard": {
                 "name": "標準",
                 "description": "基本的な役職構成です。",
@@ -82,6 +89,12 @@ class RoleComposerCog(commands.Cog):
                 }
             }
         }
+        
+        # ログ出力して戻り値の型を確認（デバッグ用）
+        print(f"[DEBUG] _load_presets returning: {type(presets)}")
+        print(f"[DEBUG] presets keys: {presets.keys()}")
+        
+        return presets
     
     @commands.group(name="compose", invoke_without_command=True)
     @commands.has_permissions(administrator=True)
@@ -158,14 +171,21 @@ class RoleComposerCog(commands.Cog):
     @commands.has_permissions(administrator=True)
     async def apply_preset(self, ctx, preset_id=None):
         """プリセット構成を適用する安全実装"""
+        print("[DEBUG] apply_preset called with preset_id:", preset_id)
+        
         # 安全な実装でエラーハンドリング
         try:
             # 直接実装してエラーを回避
             if preset_id is None:
                 # プリセット名のリストを作成
                 preset_list = ", ".join([f"{name}" for name in self.presets.keys()])
+                print(f"[DEBUG] No preset_id provided. Available presets: {preset_list}")
                 await ctx.send(f"プリセット名を指定してください。例: `!compose apply standard`\n\n利用可能なプリセット: {preset_list}")
                 return
+            
+            print(f"[DEBUG] Processing preset_id: {preset_id}")
+            print(f"[DEBUG] self.presets type: {type(self.presets)}")
+            print(f"[DEBUG] self.presets keys: {self.presets.keys() if hasattr(self.presets, 'keys') else 'No keys method'}")
             
             # 前処理: トリミングと小文字変換
             preset_id = preset_id.strip().lower()
@@ -179,19 +199,31 @@ class RoleComposerCog(commands.Cog):
                     
             if preset_key is None:
                 preset_list = ", ".join([f"{name}" for name in self.presets.keys()])
+                print(f"[DEBUG] Preset {preset_id} not found. Available presets: {preset_list}")
                 await ctx.send(f"プリセット `{preset_id}` は存在しません。\n利用可能なプリセット: {preset_list}")
                 return
             
             # 見つかったキーを使用
             preset_id = preset_key
+            print(f"[DEBUG] Using preset key: {preset_id}")
+            
+            try:
+                preset_name = self.presets[preset_id]['name']
+                preset_desc = self.presets[preset_id]['description']
+                print(f"[DEBUG] Found preset: {preset_name}")
+            except Exception as key_e:
+                print(f"[DEBUG] Error accessing preset data: {key_e}")
+                traceback.print_exc()
+                await ctx.send(f"プリセットデータの読み込み中にエラーが発生しました。")
+                return
             
             # 成功メッセージを先に送信
-            await ctx.send(f"✅ プリセット「{self.presets[preset_id]['name']}」を適用しました。")
+            await ctx.send(f"✅ プリセット「{preset_name}」を適用しました。")
             
             # 構成内容表示
             embed = discord.Embed(
-                title=f"プリセット「{self.presets[preset_id]['name']}」の構成",
-                description=f"{self.presets[preset_id]['description']}",
+                title=f"プリセット「{preset_name}」の構成",
+                description=f"{preset_desc}",
                 color=discord.Color.green()
             )
             
@@ -421,17 +453,25 @@ class RoleComposerCog(commands.Cog):
     @compose.command(name="show")
     async def show_composition(self, ctx, player_count: int = None):
         """現在の役職構成を表示"""
+        print(f"[DEBUG] show_composition called with player_count: {player_count}")
+        
         try:
             # 設定を取得
+            print(f"[DEBUG] Loading server config for guild: {ctx.guild.id}")
             config_data = await self._load_server_config(ctx.guild.id)
+            print(f"[DEBUG] Config data loaded: {type(config_data)}")
+            
             if not config_data:
+                print(f"[DEBUG] No config data found")
                 await ctx.send("役職構成が設定されていません。")
                 return
                 
             # roles_configを取得
             roles_config = config_data.get("roles_config", {})
+            print(f"[DEBUG] Roles config: {type(roles_config)}")
             
             if not roles_config:
+                print(f"[DEBUG] No roles config found")
                 await ctx.send("役職構成が設定されていません。")
                 return
             
