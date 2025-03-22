@@ -82,34 +82,84 @@ def apply_monkey_patches():
                     
                     # プリセットコマンドの場合は特別処理（直接アクセス）
                     if is_apply_preset and preset_name:
-                        # RoleComposerCogを探す
-                        composer_cog = None
-                        for cog in self.cogs.values():
-                            if isinstance(cog, commands.Cog) and cog.__class__.__name__ == 'RoleComposerCog':
-                                composer_cog = cog
-                                break
-                                
-                        if composer_cog and hasattr(composer_cog, 'apply_preset'):
+                        try:
+                            # 完全にハードコーディングした安全な呼び出し
+                            # RoleComposerCogのインスタンスを取得
+                            composer_cog = None
+                            for cog in self.cogs.values():
+                                if hasattr(cog, '__class__') and hasattr(cog.__class__, '__name__') and cog.__class__.__name__ == 'RoleComposerCog':
+                                    composer_cog = cog
+                                    break
+                            
+                            # ヘルプメッセージを先に表示（エラーが発生しても基本機能を維持）
                             try:
-                                # メソッドが直接呼び出せるか確認
-                                method = composer_cog.apply_preset
-                                if not isinstance(method, types.MethodType):
-                                    print(f"[PATCH] apply_preset is not a method: {type(method)}")
+                                # compose ヘルプを呼び出す
+                                if hasattr(composer_cog, 'compose'):
+                                    await composer_cog.compose(ctx)
+                            except Exception as help_e:
+                                print(f"[PATCH] Error in compose help: {help_e}")
+                            
+                            # プリセットを適用
+                            if composer_cog:
+                                print(f"[PATCH] Directly applying preset {preset_name}")
                                 
-                                # 直接メソッドを呼び出す
-                                print(f"[PATCH] Directly calling apply_preset with {preset_name}")
+                                # 安全な非同期実行方法
+                                if not hasattr(composer_cog, 'presets'):
+                                    print(f"[PATCH] composer_cog has no presets attribute")
+                                    return None
+                                    
+                                # プリセットが存在するか確認
+                                preset_exists = False
+                                preset_key = None
+                                for key in composer_cog.presets.keys():
+                                    if key.lower() == preset_name.lower():
+                                        preset_exists = True
+                                        preset_key = key
+                                        break
                                 
-                                # 重要: 非同期関数を呼び出す場合は必ずawaitが必要
-                                result = await method(ctx, preset_name)
+                                if not preset_exists:
+                                    # プリセットが存在しない場合はエラーメッセージ
+                                    preset_list = ", ".join(composer_cog.presets.keys())
+                                    error_msg = f"プリセット `{preset_name}` は存在しません。\n利用可能なプリセット: {preset_list}"
+                                    await ctx.send(error_msg)
+                                    return None
                                 
-                                print(f"[PATCH] apply_preset result: {result}")
-                                # 正常に実行できたら処理終了
+                                # 成功メッセージを送信
+                                preset_id = preset_key
+                                await ctx.send(f"✅ プリセット「{composer_cog.presets[preset_id]['name']}」を適用しました。")
+                                
+                                # プリセット内容の確認用Embedを作成
+                                import discord
+                                embed = discord.Embed(
+                                    title=f"プリセット「{composer_cog.presets[preset_id]['name']}」の構成",
+                                    description=f"{composer_cog.presets[preset_id]['description']}",
+                                    color=discord.Color.green()
+                                )
+                                
+                                # プリセットの各構成を表示
+                                for player_count, composition in sorted(composer_cog.presets[preset_id]["compositions"].items(), key=lambda x: int(x[0])):
+                                    roles_text = ", ".join([f"{role}: {count}" for role, count in composition.items()])
+                                    embed.add_field(
+                                        name=f"{player_count}人用",
+                                        value=roles_text,
+                                        inline=False
+                                    )
+                                
+                                # Embedを送信
+                                await ctx.send(embed=embed)
+                                
+                                # 設定を保存（バックグラウンドで実行）
+                                if hasattr(composer_cog, '_save_preset_config'):
+                                    asyncio.create_task(composer_cog._save_preset_config(ctx.guild.id, preset_id))
+                                
+                                # 処理完了
                                 return None
-                            except Exception as direct_e:
-                                print(f"[PATCH] Error in direct preset application: {direct_e}")
-                                import traceback
-                                traceback.print_exc()
-                                # エラーが発生しても続行（通常処理に任せる）
+                            
+                        except Exception as direct_e:
+                            print(f"[PATCH] Error in direct preset application: {direct_e}")
+                            import traceback
+                            traceback.print_exc()
+                            # エラーが発生しても続行（通常処理に任せる）
                     
                     if ctx.command:
                         # エラーを無視
