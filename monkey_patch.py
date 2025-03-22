@@ -10,6 +10,10 @@ def apply_monkey_patches():
     """Discord.pyの内部実装にモンキーパッチを適用"""
     print("Applying monkey patches...")
     
+    # 必要なモジュールをインポート
+    import types
+    import asyncio
+    
     try:
         # Discord.pyのHTTPClientクラスをパッチ
         import discord
@@ -87,13 +91,24 @@ def apply_monkey_patches():
                                 
                         if composer_cog and hasattr(composer_cog, 'apply_preset'):
                             try:
+                                # メソッドが直接呼び出せるか確認
+                                method = composer_cog.apply_preset
+                                if not isinstance(method, types.MethodType):
+                                    print(f"[PATCH] apply_preset is not a method: {type(method)}")
+                                
                                 # 直接メソッドを呼び出す
                                 print(f"[PATCH] Directly calling apply_preset with {preset_name}")
-                                await composer_cog.apply_preset(ctx, preset_name)
+                                
+                                # 重要: 非同期関数を呼び出す場合は必ずawaitが必要
+                                result = await method(ctx, preset_name)
+                                
+                                print(f"[PATCH] apply_preset result: {result}")
                                 # 正常に実行できたら処理終了
                                 return None
                             except Exception as direct_e:
                                 print(f"[PATCH] Error in direct preset application: {direct_e}")
+                                import traceback
+                                traceback.print_exc()
                                 # エラーが発生しても続行（通常処理に任せる）
                     
                     if ctx.command:

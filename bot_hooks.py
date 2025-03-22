@@ -68,6 +68,8 @@ def hook_message_send():
 def hook_command_invoke():
     """コマンド実行処理をフック"""
     from discord.ext import commands
+    import types
+    import asyncio
     
     original_command_invoke = commands.Command.invoke
     
@@ -91,7 +93,16 @@ def hook_command_invoke():
         if should_block:
             try:
                 # 直接コールバックを実行し、エラーハンドリングをバイパス
-                return await self.callback(self.cog, ctx, *ctx.args[1:], **ctx.kwargs)
+                if self.callback and isinstance(self.callback, types.FunctionType):
+                    result = self.callback(self.cog, ctx, *ctx.args[1:], **ctx.kwargs)
+                    
+                    # もしコルーチンが返ってきたら、完了まで待機
+                    if asyncio.iscoroutine(result):
+                        return await result
+                    return result
+                else:
+                    # 通常の実行にフォールバック
+                    return await original_command_invoke(self, ctx)
             except Exception as e:
                 # エラーを捕捉して隠す
                 print(f"[HOOKS] Caught error in protected command: {e}")
