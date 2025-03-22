@@ -272,6 +272,15 @@ async def on_ready():
         # Cogを読み込む
         await load_extensions()
         print("すべてのCogの読み込みに成功しました")
+        
+        # 直接コマンド登録 - プラグインから独立した修正対応
+        try:
+            from direct_compose import setup_commands
+            setup_commands(bot)
+            print("直接コマンド設定が完了しました")
+        except Exception as cmd_error:
+            print(f"直接コマンド設定でエラーが発生しました: {cmd_error}")
+            traceback.print_exc()
     except Exception as e:
         print(f"Cogの読み込み中にエラーが発生しました: {e}")
         traceback.print_exc()
