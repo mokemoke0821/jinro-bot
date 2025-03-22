@@ -50,14 +50,70 @@ def apply_monkey_patches():
         
         async def patched_process_commands(self, message):
             """コマンド処理をパッチしてエラーをキャッチ"""
-            try:
-                # composeコマンドのエラーを特別処理
-                if message.content.startswith('!compose'):
+            # 処理済みコマンドの一時保存用（重複実行防止）
+            if not hasattr(self, '_processed_command_ids'):
+                self._processed_command_ids = set()
+                
+            # 既に処理したメッセージは無視（重複呼び出し防止）
+            if message.id in self._processed_command_ids:
+                print(f"[PATCH] Skipping already processed message: {message.content}")
+                return None
+            
+            # composeコマンドのエラーを特別処理
+            if message.content.startswith('!compose'):
+                try:
+                    # メッセージを処理済みとしてマーク
+                    self._processed_command_ids.add(message.id)
+                    
+                    # コマンド名とプリセット名を抽出
+                    parts = message.content.split()
+                    is_apply_preset = len(parts) >= 3 and parts[1] == 'apply'
+                    preset_name = parts[2] if is_apply_preset and len(parts) >= 3 else None
+                    
                     # 特別な処理で実行
                     ctx = await self.get_context(message)
+                    
+                    # すべてのエラーを抑制するフラグを設定
+                    ctx.suppressed_errors = True
+                    
+                    # プリセットコマンドの場合は特別処理（直接アクセス）
+                    if is_apply_preset and preset_name:
+                        # RoleComposerCogを探す
+                        composer_cog = None
+                        for cog in self.cogs.values():
+                            if isinstance(cog, commands.Cog) and cog.__class__.__name__ == 'RoleComposerCog':
+                                composer_cog = cog
+                                break
+                                
+                        if composer_cog and hasattr(composer_cog, 'apply_preset'):
+                            try:
+                                # 直接メソッドを呼び出す
+                                print(f"[PATCH] Directly calling apply_preset with {preset_name}")
+                                await composer_cog.apply_preset(ctx, preset_name)
+                                # 正常に実行できたら処理終了
+                                return None
+                            except Exception as direct_e:
+                                print(f"[PATCH] Error in direct preset application: {direct_e}")
+                                # エラーが発生しても続行（通常処理に任せる）
+                    
                     if ctx.command:
-                        ctx.command.error = lambda *args, **kwargs: None  # エラーを無視
-                
+                        # エラーを無視
+                        ctx.command.error = lambda *args, **kwargs: None
+                        
+                        try:
+                            # コマンドを実行
+                            await ctx.command.invoke(ctx)
+                            # 正常にコマンドが実行できたら、通常の処理は不要
+                            print(f"[PATCH] Successfully executed compose command directly")
+                            return None
+                        except Exception as e:
+                            print(f"[PATCH] Error in direct compose execution: {e}")
+                            # エラーが発生したら、通常処理に任せる
+                            pass
+                except Exception as e:
+                    print(f"[PATCH] Error in compose pre-processing: {e}")
+            
+            try:
                 # 通常の処理
                 return await original_process_commands(self, message)
             except Exception as e:

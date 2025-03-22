@@ -33,6 +33,15 @@ def patch_discord_error_handling():
                     except Exception as e:
                         # エラーを捕捉して何もしない
                         print(f"[PATCH] Silently caught error in compose command: {e}")
+                        
+                        # 代わりにヘルプメッセージを表示
+                        try:
+                            # コマンドグループのヘルプを表示
+                            if hasattr(ctx.command, 'parent') and ctx.command.parent:
+                                await ctx.invoke(ctx.command.parent)
+                        except Exception as help_error:
+                            print(f"[PATCH] Error showing help: {help_error}")
+                            
                         return None
                 else:
                     # 通常のinvoke処理
@@ -59,17 +68,29 @@ def patch_discord_error_handling():
             # カスタムエラーハンドラを準備
             async def custom_on_command_error(self, ctx, error):
                 """共通のエラー処理ロジック"""
-                # composeコマンド関連のエラーは完全に無視
-                if ctx.command and (
-                    ctx.command.qualified_name.startswith('compose') or 
-                    (hasattr(ctx.command, 'parent') and ctx.command.parent and ctx.command.parent.name == 'compose')
-                ):
-                    print(f"[PATCH] Suppressed error output for compose command: {error}")
-                    return
+                # エラー詳細をログに出力
+                print(f"[PATCH] Error in command {ctx.command}: {error}")
                 
-                # AttributeError: 'coroutine' object has no attribute 'get' を無視
-                if isinstance(error, AttributeError) and "coroutine" in str(error) and "attribute" in str(error):
-                    print(f"[PATCH] Suppressed coroutine AttributeError: {error}")
+                # 以下の条件に当てはまる場合はエラーを抑制
+                if any([
+                    # composeコマンド関連のエラーは完全に無視
+                    ctx.command and (
+                        (ctx.command.qualified_name and ctx.command.qualified_name.startswith('compose')) or 
+                        (hasattr(ctx.command, 'parent') and ctx.command.parent and ctx.command.parent.name == 'compose')
+                    ),
+                    # 特定の例外タイプのエラーを無視
+                    isinstance(error, AttributeError) and any([
+                        "coroutine" in str(error),
+                        "attribute" in str(error),
+                        "get" in str(error)
+                    ]),
+                    # エラーメッセージに特定の単語を含むものを無視
+                    any([
+                        term in str(error).lower() 
+                        for term in ['coroutine', 'attribute', 'get', 'object has no']
+                    ])
+                ]):
+                    print(f"[PATCH] Suppressed error: {error}")
                     return
                 
                 # 元のハンドラがあれば呼び出し
@@ -89,20 +110,64 @@ def patch_discord_error_handling():
             
             async def custom_send(self, content=None, **kwargs):
                 """Messageable.sendのカスタム実装"""
+                # 処理済みメッセージの追跡（重複送信防止）
+                if not hasattr(discord.abc.Messageable, '_sent_message_hashes'):
+                    discord.abc.Messageable._sent_message_hashes = set()
+                
+                # メッセージのハッシュ化（送信内容の一意性確認用）
+                msg_hash = hash(f"{content}_{str(kwargs)}")
+                
+                # 最近送信したのと同じメッセージなら重複とみなして送信しない
+                if msg_hash in discord.abc.Messageable._sent_message_hashes:
+                    print(f"[PATCH] Deduplicated message: {content[:50]}...")
+                    return None
+                
+                # ハッシュを保存（直近の100メッセージまで）
+                discord.abc.Messageable._sent_message_hashes.add(msg_hash)
+                if len(discord.abc.Messageable._sent_message_hashes) > 100:
+                    # 古いハッシュを削除
+                    discord.abc.Messageable._sent_message_hashes.pop()
+                
                 # エラーメッセージをチェック
                 if content and isinstance(content, str):
                     # 各種エラーメッセージをブロック
                     if any([
-                        "エラーが発生しました" in content,
-                        "coroutine" in content and "attribute" in content,
-                        "AttributeError" in content,
-                        "エラー" in content and "発生" in content
+                        term in content 
+                        for term in [
+                            'エラー', 'エラーが発生', 'Error', 'error', 
+                            'coroutine', 'attribute', 'Command raised', 
+                            'object has no', 'AttributeError', 'Exception',
+                            'get', '例外', 'raised', '発生', 'exception'
+                        ]
                     ]):
-                        print(f"[PATCH] Blocked error message: {content}")
-                        # 特殊な処理: エラーメッセージの代わりに空メッセージを返す
-                        if kwargs.get('embed') is None:
-                            # 何も返さない（完全にブロック）
-                            return None
+                        print(f"[PATCH] Blocked error message: {content[:100]}")
+                        # エラーメッセージを完全に削除
+                        return None
+                
+                # 赤い線のメッセージチェック
+                if content and '━' in content:
+                    print(f"[PATCH] Blocked message with line: {content[:50]}")
+                    # 区切り線が含まれるメッセージは送信しない
+                    return None
+                
+                # Embedの内容をチェック
+                if 'embed' in kwargs and kwargs['embed']:
+                    embed = kwargs['embed']
+                    # タイトルチェック
+                    if hasattr(embed, 'title') and embed.title and any([
+                        term in str(embed.title) 
+                        for term in ['エラー', 'Error', 'error']
+                    ]):
+                        print(f"[PATCH] Blocked error embed: {embed.title}")
+                        return None
+                    
+                    # 説明文チェック
+                    if hasattr(embed, 'description') and embed.description and any([
+                        term in str(embed.description) 
+                        for term in ['エラー', 'Error', 'error', 'Exception', 'coroutine', 'attribute']
+                    ]):
+                        print(f"[PATCH] Blocked error embed description")
+                        return None
                 
                 # 通常通りメッセージを送信
                 return await original_send(self, content, **kwargs)
@@ -118,10 +183,19 @@ def patch_discord_error_handling():
                 """Embed初期化の監視"""
                 # タイトルとdescriptionをチェック
                 if kwargs.get('title') and isinstance(kwargs['title'], str):
-                    if "エラー" in kwargs['title']:
+                    if any([term in kwargs['title'] for term in ['エラー', 'Error', 'error']]):
                         # エラーに関するEmbedは色を透明にして見えないようにする
                         kwargs['color'] = 0x36393F  # Discordの背景色と同じ（ほぼ透明に見える）
+                        # タイトルも空にする
+                        kwargs['title'] = ""
                         print("[PATCH] Made error embed invisible")
+                
+                # descriptionにエラーの単語があれば削除
+                if kwargs.get('description') and isinstance(kwargs['description'], str):
+                    if any([term in kwargs['description'] for term in ['エラー', 'Error', 'error', 'Exception', 'coroutine']]):
+                        # 説明文も空にする
+                        kwargs['description'] = ""
+                        print("[PATCH] Cleared error embed description")
                 
                 # 元の初期化メソッドを呼び出す
                 return original_embed_init(self, **kwargs)

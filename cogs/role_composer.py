@@ -87,15 +87,28 @@ class RoleComposerCog(commands.Cog):
     @commands.has_permissions(administrator=True)
     async def compose(self, ctx):
         """役職構成を管理するコマンドグループ"""
+        # すでに処理済みのメッセージは無視（重複表示防止）
+        if hasattr(ctx.bot, '_processed_help_ids') and ctx.message.id in ctx.bot._processed_help_ids:
+            print(f"[COMPOSE] Skipping already processed help message")
+            return
+
+        # 処理済みとしてマーク
+        if not hasattr(ctx.bot, '_processed_help_ids'):
+            ctx.bot._processed_help_ids = set()
+        ctx.bot._processed_help_ids.add(ctx.message.id)
+        
+        # 利用可能なプリセットを表示
+        preset_list = ", ".join(self.presets.keys())
+        
         embed = discord.Embed(
             title="役職構成管理",
-            description="以下のコマンドで役職構成を管理できます。",
+            description=f"以下のコマンドで役職構成を管理できます。\n\n利用可能なプリセット: {preset_list}",
             color=discord.Color.blue()
         )
         
         embed.add_field(
             name="プリセット一覧",
-            value="`!compose presets` - 利用可能なプリセット一覧を表示",
+            value="`!compose presets` - プリセット一覧を表示",
             inline=False
         )
         
@@ -117,7 +130,10 @@ class RoleComposerCog(commands.Cog):
             inline=False
         )
         
-        await ctx.send(embed=embed)
+        try:
+            await ctx.send(embed=embed)
+        except Exception as e:
+            print(f"[COMPOSE] Error sending help embed: {e}")
     
     @compose.command(name="presets")
     async def show_presets(self, ctx):
@@ -142,86 +158,106 @@ class RoleComposerCog(commands.Cog):
     @commands.has_permissions(administrator=True)
     async def apply_preset(self, ctx, preset_id=None):
         """プリセット構成を適用する安全実装"""
-        # 直接実装してエラーを回避
-        if preset_id is None:
-            # プリセット名のリストを作成
-            preset_names = ", ".join([f"`{name}`" for name in self.presets.keys()])
-            await ctx.send(f"プリセット名を指定してください。例: `!compose apply standard`\n\n利用可能なプリセット: {preset_names}")
-            return
-        
-        # プリセットの存在確認
-        if preset_id not in self.presets:
-            preset_names = ", ".join([f"`{name}`" for name in self.presets.keys()])
-            await ctx.send(f"プリセット `{preset_id}` は存在しません。\n利用可能なプリセット: {preset_names}")
-            return
-        
-        # 成功メッセージを先に送信
-        msg = await ctx.send(f"✅ プリセット「{self.presets[preset_id]['name']}」を適用しました。")
-        
-        # 構成内容表示
-        embed = discord.Embed(
-            title=f"プリセット「{self.presets[preset_id]['name']}」の構成",
-            description=f"{self.presets[preset_id]['description']}",
-            color=discord.Color.green()
-        )
-        
-        for player_count, composition in sorted(self.presets[preset_id]["compositions"].items(), key=lambda x: int(x[0])):
-            roles_text = ", ".join([f"{role}: {count}" for role, count in composition.items()])
-            embed.add_field(
-                name=f"{player_count}人用",
-                value=roles_text,
-                inline=False
-            )
-        
-        await ctx.send(embed=embed)
-        
-        # バックグラウンドでデータを保存
+        # 安全な実装でエラーハンドリング
         try:
-            # ディレクトリが存在することを確認
-            os.makedirs("data/config", exist_ok=True)
+            # 直接実装してエラーを回避
+            if preset_id is None:
+                # プリセット名のリストを作成
+                preset_list = ", ".join([f"{name}" for name in self.presets.keys()])
+                await ctx.send(f"プリセット名を指定してください。例: `!compose apply standard`\n\n利用可能なプリセット: {preset_list}")
+                return
             
-            # 設定ファイルパスを作成
-            config_path = f"data/config/server_{ctx.guild.id}.json"
+            # 前処理: トリミングと小文字変換
+            preset_id = preset_id.strip().lower()
             
-            # 既存の設定を読み込む（存在しない場合はデフォルト設定を使用）
+            # プリセットの存在確認（大文字小文字を区別しない）
+            preset_key = None
+            for key in self.presets.keys():
+                if key.lower() == preset_id:
+                    preset_key = key
+                    break
+                    
+            if preset_key is None:
+                preset_list = ", ".join([f"{name}" for name in self.presets.keys()])
+                await ctx.send(f"プリセット `{preset_id}` は存在しません。\n利用可能なプリセット: {preset_list}")
+                return
+            
+            # 見つかったキーを使用
+            preset_id = preset_key
+            
+            # 成功メッセージを先に送信
+            msg = await ctx.send(f"✅ プリセット「{self.presets[preset_id]['name']}」を適用しました。")
+            
+            # 構成内容表示
+            embed = discord.Embed(
+                title=f"プリセット「{self.presets[preset_id]['name']}」の構成",
+                description=f"{self.presets[preset_id]['description']}",
+                color=discord.Color.green()
+            )
+            
+            for player_count, composition in sorted(self.presets[preset_id]["compositions"].items(), key=lambda x: int(x[0])):
+                roles_text = ", ".join([f"{role}: {count}" for role, count in composition.items()])
+                embed.add_field(
+                    name=f"{player_count}人用",
+                    value=roles_text,
+                    inline=False
+                )
+            
+            await ctx.send(embed=embed)
+            
+            # バックグラウンドでデータを保存
             try:
-                with open(config_path, "r", encoding="utf-8") as f:
-                    settings = json.load(f)
-            except (FileNotFoundError, json.JSONDecodeError):
-                settings = {
-                    "roles_config": {},
-                    "game_rules": {
-                        "no_first_night_kill": False,
-                        "lovers_enabled": False,
-                        "no_consecutive_guard": True,
-                        "random_tied_vote": False,
-                        "dead_chat_enabled": True
-                    },
-                    "timers": {
-                        "day": 300,
-                        "night": 90,
-                        "voting": 60
+                # ディレクトリが存在することを確認
+                os.makedirs("data/config", exist_ok=True)
+                
+                # 設定ファイルパスを作成
+                config_path = f"data/config/server_{ctx.guild.id}.json"
+                
+                # 既存の設定を読み込む（存在しない場合はデフォルト設定を使用）
+                try:
+                    with open(config_path, "r", encoding="utf-8") as f:
+                        settings = json.load(f)
+                except (FileNotFoundError, json.JSONDecodeError):
+                    settings = {
+                        "roles_config": {},
+                        "game_rules": {
+                            "no_first_night_kill": False,
+                            "lovers_enabled": False,
+                            "no_consecutive_guard": True,
+                            "random_tied_vote": False,
+                            "dead_chat_enabled": True
+                        },
+                        "timers": {
+                            "day": 300,
+                            "night": 90,
+                            "voting": 60
+                        }
                     }
-                }
-            
-            # roles_configを確保
-            if "roles_config" not in settings:
-                settings["roles_config"] = {}
-            
-            # プリセットの構成をコピー
-            for player_count, composition in self.presets[preset_id]["compositions"].items():
-                settings["roles_config"][player_count] = composition
-            
-            # 設定をファイルに保存
-            with open(config_path, "w", encoding="utf-8") as f:
-                json.dump(settings, f, ensure_ascii=False, indent=2)
-            
-            print(f"[COMPOSE] Successfully saved preset {preset_id} for server {ctx.guild.id}")
-        
+                
+                # roles_configを確保
+                if "roles_config" not in settings:
+                    settings["roles_config"] = {}
+                
+                # プリセットの構成をコピー
+                for player_count, composition in self.presets[preset_id]["compositions"].items():
+                    settings["roles_config"][player_count] = composition
+                
+                # 設定をファイルに保存
+                with open(config_path, "w", encoding="utf-8") as f:
+                    json.dump(settings, f, ensure_ascii=False, indent=2)
+                
+                print(f"[COMPOSE] Successfully saved preset {preset_id} for server {ctx.guild.id}")
+                
+            except Exception as e:
+                # エラーをログに出力するだけで、ユーザーには表示しない
+                print(f"[COMPOSE] Error saving preset: {e}")
+                traceback.print_exc()
+                
         except Exception as e:
-            # エラーをログに出力するだけで、ユーザーには表示しない
-            print(f"[COMPOSE] Error saving preset: {e}")
+            # エラーをログに出力してユーザーにもエラーメッセージを表示
+            print(f"[COMPOSE] Error in apply_preset: {e}")
             traceback.print_exc()
+            await ctx.send(f"プリセットの適用中にエラーが発生しました: {str(e)}")
     
     @compose.command(name="custom")
     @commands.has_permissions(administrator=True)
