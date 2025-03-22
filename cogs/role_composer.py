@@ -186,7 +186,7 @@ class RoleComposerCog(commands.Cog):
             preset_id = preset_key
             
             # 成功メッセージを先に送信
-            msg = await ctx.send(f"✅ プリセット「{self.presets[preset_id]['name']}」を適用しました。")
+            await ctx.send(f"✅ プリセット「{self.presets[preset_id]['name']}」を適用しました。")
             
             # 構成内容表示
             embed = discord.Embed(
@@ -205,59 +205,64 @@ class RoleComposerCog(commands.Cog):
             
             await ctx.send(embed=embed)
             
-            # バックグラウンドでデータを保存
-            try:
-                # ディレクトリが存在することを確認
-                os.makedirs("data/config", exist_ok=True)
-                
-                # 設定ファイルパスを作成
-                config_path = f"data/config/server_{ctx.guild.id}.json"
-                
-                # 既存の設定を読み込む（存在しない場合はデフォルト設定を使用）
-                try:
-                    with open(config_path, "r", encoding="utf-8") as f:
-                        settings = json.load(f)
-                except (FileNotFoundError, json.JSONDecodeError):
-                    settings = {
-                        "roles_config": {},
-                        "game_rules": {
-                            "no_first_night_kill": False,
-                            "lovers_enabled": False,
-                            "no_consecutive_guard": True,
-                            "random_tied_vote": False,
-                            "dead_chat_enabled": True
-                        },
-                        "timers": {
-                            "day": 300,
-                            "night": 90,
-                            "voting": 60
-                        }
-                    }
-                
-                # roles_configを確保
-                if "roles_config" not in settings:
-                    settings["roles_config"] = {}
-                
-                # プリセットの構成をコピー
-                for player_count, composition in self.presets[preset_id]["compositions"].items():
-                    settings["roles_config"][player_count] = composition
-                
-                # 設定をファイルに保存
-                with open(config_path, "w", encoding="utf-8") as f:
-                    json.dump(settings, f, ensure_ascii=False, indent=2)
-                
-                print(f"[COMPOSE] Successfully saved preset {preset_id} for server {ctx.guild.id}")
-                
-            except Exception as e:
-                # エラーをログに出力するだけで、ユーザーには表示しない
-                print(f"[COMPOSE] Error saving preset: {e}")
-                traceback.print_exc()
+            # データを保存
+            await self._save_preset_config(ctx.guild.id, preset_id)
                 
         except Exception as e:
             # エラーをログに出力してユーザーにもエラーメッセージを表示
             print(f"[COMPOSE] Error in apply_preset: {e}")
             traceback.print_exc()
             await ctx.send(f"プリセットの適用中にエラーが発生しました: {str(e)}")
+    
+    async def _save_preset_config(self, guild_id, preset_id):
+        """プリセット設定をファイルに保存する"""
+        try:
+            # ディレクトリが存在することを確認
+            os.makedirs("data/config", exist_ok=True)
+            
+            # 設定ファイルパスを作成
+            config_path = f"data/config/server_{guild_id}.json"
+            
+            # 既存の設定を読み込む（存在しない場合はデフォルト設定を使用）
+            try:
+                with open(config_path, "r", encoding="utf-8") as f:
+                    settings = json.load(f)
+            except (FileNotFoundError, json.JSONDecodeError):
+                settings = {
+                    "roles_config": {},
+                    "game_rules": {
+                        "no_first_night_kill": False,
+                        "lovers_enabled": False,
+                        "no_consecutive_guard": True,
+                        "random_tied_vote": False,
+                        "dead_chat_enabled": True
+                    },
+                    "timers": {
+                        "day": 300,
+                        "night": 90,
+                        "voting": 60
+                    }
+                }
+            
+            # roles_configを確保
+            if "roles_config" not in settings:
+                settings["roles_config"] = {}
+            
+            # プリセットの構成をコピー
+            for player_count, composition in self.presets[preset_id]["compositions"].items():
+                settings["roles_config"][player_count] = composition
+            
+            # 設定をファイルに保存
+            with open(config_path, "w", encoding="utf-8") as f:
+                json.dump(settings, f, ensure_ascii=False, indent=2)
+            
+            print(f"[COMPOSE] Successfully saved preset {preset_id} for server {guild_id}")
+            return True
+        except Exception as e:
+            # エラーをログに出力するだけ
+            print(f"[COMPOSE] Error saving preset: {e}")
+            traceback.print_exc()
+            return False
     
     @compose.command(name="custom")
     @commands.has_permissions(administrator=True)
@@ -307,13 +312,17 @@ class RoleComposerCog(commands.Cog):
         roles_text = "\n".join([f"- {role}: {count}人" for role, count in composition.items()])
         await ctx.send(f"✅ {player_count}人用のカスタム役職構成を設定しました：\n{roles_text}")
         
-        # バックグラウンドでデータを保存
+        # 設定を保存
+        await self._save_custom_composition(ctx.guild.id, player_count, composition)
+    
+    async def _save_custom_composition(self, guild_id, player_count, composition):
+        """カスタム役職構成をファイルに保存する"""
         try:
             # ディレクトリが存在することを確認
             os.makedirs("data/config", exist_ok=True)
             
             # 設定ファイルパスを作成
-            config_path = f"data/config/server_{ctx.guild.id}.json"
+            config_path = f"data/config/server_{guild_id}.json"
             
             # 既存の設定を読み込む（存在しない場合はデフォルト設定を使用）
             try:
@@ -347,12 +356,14 @@ class RoleComposerCog(commands.Cog):
             with open(config_path, "w", encoding="utf-8") as f:
                 json.dump(settings, f, ensure_ascii=False, indent=2)
             
-            print(f"[COMPOSE] Successfully saved custom composition for {player_count} players in server {ctx.guild.id}")
+            print(f"[COMPOSE] Successfully saved custom composition for {player_count} players in server {guild_id}")
+            return True
             
         except Exception as e:
-            # エラーをログに出力するだけで、ユーザーには表示しない
+            # エラーをログに出力するだけ
             print(f"[COMPOSE] Error saving custom composition: {e}")
             traceback.print_exc()
+            return False
     
     @compose.command(name="force")
     @commands.has_permissions(administrator=True)
@@ -404,70 +415,21 @@ class RoleComposerCog(commands.Cog):
         warning_icon = "⚠️ " if warnings else ""
         await ctx.send(f"{warning_icon}{player_count}人用のカスタム役職構成を強制設定しました：\n{roles_text}")
         
-        # バックグラウンドでデータを保存
-        try:
-            # ディレクトリが存在することを確認
-            os.makedirs("data/config", exist_ok=True)
-            
-            # 設定ファイルパスを作成
-            config_path = f"data/config/server_{ctx.guild.id}.json"
-            
-            # 既存の設定を読み込む（存在しない場合はデフォルト設定を使用）
-            try:
-                with open(config_path, "r", encoding="utf-8") as f:
-                    settings = json.load(f)
-            except (FileNotFoundError, json.JSONDecodeError):
-                settings = {
-                    "roles_config": {},
-                    "game_rules": {
-                        "no_first_night_kill": False,
-                        "lovers_enabled": False,
-                        "no_consecutive_guard": True,
-                        "random_tied_vote": False,
-                        "dead_chat_enabled": True
-                    },
-                    "timers": {
-                        "day": 300,
-                        "night": 90,
-                        "voting": 60
-                    }
-                }
-            
-            # roles_configを確保
-            if "roles_config" not in settings:
-                settings["roles_config"] = {}
-            
-            # カスタム構成を保存
-            settings["roles_config"][str(player_count)] = composition
-            
-            # 設定をファイルに保存
-            with open(config_path, "w", encoding="utf-8") as f:
-                json.dump(settings, f, ensure_ascii=False, indent=2)
-            
-            print(f"[COMPOSE] Successfully saved forced custom composition for {player_count} players in server {ctx.guild.id}")
-            
-        except Exception as e:
-            # エラーをログに出力するだけで、ユーザーには表示しない
-            print(f"[COMPOSE] Error saving forced custom composition: {e}")
-            traceback.print_exc()
+        # 設定を保存
+        await self._save_custom_composition(ctx.guild.id, player_count, composition)
     
     @compose.command(name="show")
     async def show_composition(self, ctx, player_count: int = None):
         """現在の役職構成を表示"""
         try:
-            # 設定ファイルパスを作成
-            config_path = f"data/config/server_{ctx.guild.id}.json"
-            
-            # 設定を読み込む
-            try:
-                with open(config_path, "r", encoding="utf-8") as f:
-                    settings = json.load(f)
-            except (FileNotFoundError, json.JSONDecodeError):
+            # 設定を取得
+            config_data = await self._load_server_config(ctx.guild.id)
+            if not config_data:
                 await ctx.send("役職構成が設定されていません。")
                 return
-            
+                
             # roles_configを取得
-            roles_config = settings.get("roles_config", {})
+            roles_config = config_data.get("roles_config", {})
             
             if not roles_config:
                 await ctx.send("役職構成が設定されていません。")
@@ -512,6 +474,24 @@ class RoleComposerCog(commands.Cog):
             print(f"[COMPOSE] Error in show_composition: {e}")
             traceback.print_exc()
             await ctx.send(f"役職構成の取得中にエラーが発生しました。")
+            
+    async def _load_server_config(self, guild_id):
+        """サーバーの設定をロードする"""
+        try:
+            # 設定ファイルパスを作成
+            config_path = f"data/config/server_{guild_id}.json"
+            
+            # 設定を読み込む
+            try:
+                with open(config_path, "r", encoding="utf-8") as f:
+                    settings = json.load(f)
+                return settings
+            except (FileNotFoundError, json.JSONDecodeError):
+                return None
+        except Exception as e:
+            print(f"[COMPOSE] Error loading config: {e}")
+            traceback.print_exc()
+            return None
     
     @compose.command(name="recommend")
     async def recommend_composition(self, ctx, player_count: int):
