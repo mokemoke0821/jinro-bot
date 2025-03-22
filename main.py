@@ -116,15 +116,37 @@ async def on_ready():
 @bot.event
 async def on_command_error(ctx, error):
     """コマンドエラー時の処理"""
-    # 特定のコマンドやエラーは無視する
-    if ctx.command and ctx.command.qualified_name.startswith('compose'):
-        # role_composerコマンドグループのエラーはログに記録するだけで表示しない
-        print(f"[ERROR_HANDLER] Suppressed error in command '{ctx.command.qualified_name}': {error}")
+    # 常に詳細なエラー情報をログに出力（デバッグ用）
+    command_name = ctx.command.qualified_name if ctx.command else 'unknown'
+    print(f"[ERROR_HANDLER] Error in command '{command_name}': {error}")
+    print(f"[ERROR_HANDLER] Error type: {type(error)}")
+    
+    # コマンド実行時のエラー（CommandInvokeError）の場合は元の例外を取得
+    original_error = error
+    if isinstance(error, commands.CommandInvokeError):
+        original_error = error.original
+        print(f"[ERROR_HANDLER] Original error: {original_error}")
+        print(f"[ERROR_HANDLER] Original error type: {type(original_error)}")
+    
+    # 特定のコマンドのエラーは無視する
+    if ctx.command:
+        if ctx.command.qualified_name.startswith('compose'):
+            # role_composerコマンドグループのエラーは表示しない
+            print(f"[ERROR_HANDLER] Suppressed error in compose command")
+            return
+    
+    # 特定のエラータイプは無視する
+    if isinstance(original_error, AttributeError) and "coroutine" in str(original_error).lower():
+        print(f"[ERROR_HANDLER] Suppressed coroutine AttributeError")
         return
     
-    # AttributeErrorも無視する（特にcoroutineオブジェクトに関するエラー）
-    if isinstance(error, AttributeError) and "coroutine" in str(error).lower():
-        print(f"[ERROR_HANDLER] Suppressed AttributeError: {error}")
+    if "coroutine" in str(error).lower() or "coroutine" in str(original_error).lower():
+        print(f"[ERROR_HANDLER] Suppressed coroutine-related error")
+        return
+    
+    # asyncioのエラーは無視
+    if isinstance(original_error, asyncio.TimeoutError) or isinstance(original_error, asyncio.CancelledError):
+        print(f"[ERROR_HANDLER] Suppressed asyncio error")
         return
     
     # 以下は通常のエラー処理

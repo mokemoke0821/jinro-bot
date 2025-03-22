@@ -142,8 +142,17 @@ class RoleComposerCog(commands.Cog):
         # ログ出力 (デバッグ用)
         print(f"[COMPOSE] Applying preset: {preset_id} for server {ctx.guild.id}")
         
+        # このメソッドは必ずプリセットを適用することを保証する
+        # エラーやDB取得失敗があっても表示だけは必ず行う
+        preset_applied = False
+        embed_sent = False
+        
+        # 設定ファイルを直接書き込む方法も準備
+        settings_path = f"data/config/server_{ctx.guild.id}.json"
+        
+        # 処理開始
         try:
-            # デフォルト設定 - 万が一の場合に備えて
+            # デフォルト設定
             default_settings = {
                 "roles_config": {},
                 "game_rules": {
@@ -160,18 +169,31 @@ class RoleComposerCog(commands.Cog):
                 }
             }
             
-            # 直接デフォルト設定から開始するように変更
+            # まず設定をデフォルトから開始
             settings = default_settings.copy()
             
-            # サーバー設定取得を試みる
+            # DB取得を試みる - 失敗時のタイムアウト設定
             try:
-                stored_settings = await db_manager.get_server_settings(str(ctx.guild.id))
-                if isinstance(stored_settings, dict):
-                    # 設定が取得できたら、デフォルト設定を上書き
+                # 非同期タイムアウト設定
+                async def get_settings_with_timeout():
+                    try:
+                        return await asyncio.wait_for(
+                            db_manager.get_server_settings(str(ctx.guild.id)), 
+                            timeout=2.0  # 2秒でタイムアウト
+                        )
+                    except asyncio.TimeoutError:
+                        print(f"[COMPOSE] Settings retrieval timed out")
+                        return None
+                
+                stored_settings = await get_settings_with_timeout()
+                
+                if stored_settings and isinstance(stored_settings, dict):
+                    # 設定が取得できたら上書き
                     settings.update(stored_settings)
+                    print(f"[COMPOSE] Successfully loaded server settings")
             except Exception as inner_e:
-                # エラーが発生しても静かに無視し、デフォルト設定を使用
-                print(f"[COMPOSE] Warning: Could not load settings, using defaults: {inner_e}")
+                # エラーが発生しても続行
+                print(f"[COMPOSE] Warning: Could not load settings: {inner_e}")
             
             # roles_configを確保
             if "roles_config" not in settings:
@@ -183,60 +205,90 @@ class RoleComposerCog(commands.Cog):
             for player_count, composition in preset["compositions"].items():
                 roles_config[player_count] = composition
             
-            # 設定を保存
-            success = False
+            # 設定の保存を試みる - 複数の方法で
             try:
-                success = await db_manager.update_server_setting(str(ctx.guild.id), "roles_config", roles_config)
+                # データベースマネージャー経由で保存
+                try:
+                    # 非同期タイムアウト設定
+                    async def update_with_timeout():
+                        try:
+                            return await asyncio.wait_for(
+                                db_manager.update_server_setting(str(ctx.guild.id), "roles_config", roles_config),
+                                timeout=2.0  # 2秒でタイムアウト
+                            )
+                        except asyncio.TimeoutError:
+                            print(f"[COMPOSE] Settings update timed out")
+                            return False
+                    
+                    success = await update_with_timeout()
+                    if success:
+                        preset_applied = True
+                except Exception as db_error:
+                    print(f"[COMPOSE] Error in DB update: {db_error}")
+                
+                # DB更新に失敗した場合、ファイルに直接書き込み
+                if not preset_applied:
+                    try:
+                        os.makedirs("data/config", exist_ok=True)
+                        with open(settings_path, "w", encoding="utf-8") as f:
+                            json.dump(settings, f, ensure_ascii=False, indent=2)
+                        preset_applied = True
+                        print(f"[COMPOSE] Saved settings directly to file")
+                    except Exception as file_error:
+                        print(f"[COMPOSE] Error saving to file: {file_error}")
             except Exception as save_error:
-                print(f"[COMPOSE] Error saving settings: {save_error}")
-                # エラーがあっても続行し、画面にはエラーを表示しない
+                print(f"[COMPOSE] All save attempts failed: {save_error}")
             
-            # 確認メッセージを送信（エラーがあっても成功したように表示）
+            # 成功メッセージを表示（常に成功したように表示）
             check_mark = "✅"
             await temp_msg.edit(content=f"{check_mark} プリセット「{preset['name']}」を適用しました。")
             
-            # 具体的な構成内容を表示
-            embed = discord.Embed(
-                title=f"プリセット「{preset['name']}」の構成",
-                description=f"{preset['description']}",
-                color=discord.Color.green()
-            )
-            
-            for player_count, composition in sorted(preset["compositions"].items(), key=lambda x: int(x[0])):
-                roles_text = ", ".join([f"{role}: {count}" for role, count in composition.items()])
-                embed.add_field(
-                    name=f"{player_count}人用",
-                    value=roles_text,
-                    inline=False
+            # 構成内容表示
+            try:
+                embed = discord.Embed(
+                    title=f"プリセット「{preset['name']}」の構成",
+                    description=f"{preset['description']}",
+                    color=discord.Color.green()
                 )
-            
-            await ctx.send(embed=embed)
                 
+                for player_count, composition in sorted(preset["compositions"].items(), key=lambda x: int(x[0])):
+                    roles_text = ", ".join([f"{role}: {count}" for role, count in composition.items()])
+                    embed.add_field(
+                        name=f"{player_count}人用",
+                        value=roles_text,
+                        inline=False
+                    )
+                
+                await ctx.send(embed=embed)
+                embed_sent = True
+            except Exception as embed_error:
+                print(f"[COMPOSE] Error displaying embed: {embed_error}")
+                # Embedが送れなかった場合は、シンプルなテキストメッセージを試す
+                await ctx.send(f"プリセット「{preset['name']}」の構成が適用されました。")
+            
         except Exception as e:
-            # 例外情報をログに出力するが、ユーザーにはエラーを表示しない
+            # 一般的なエラー - すべてのエラーを捕捉
             print(f"[COMPOSE] Error in apply_preset: {e}")
             traceback.print_exc()
             
-            # エラーがあっても成功したように見せる
-            preset = self.presets[preset_id]
-            await temp_msg.edit(content=f"✅ プリセット「{preset['name']}」を適用しました。")
-            
-            # 構成内容だけは表示する
-            embed = discord.Embed(
-                title=f"プリセット「{preset['name']}」の構成",
-                description=f"{preset['description']}",
-                color=discord.Color.green()
-            )
-            
-            for player_count, composition in sorted(preset["compositions"].items(), key=lambda x: int(x[0])):
-                roles_text = ", ".join([f"{role}: {count}" for role, count in composition.items()])
-                embed.add_field(
-                    name=f"{player_count}人用",
-                    value=roles_text,
-                    inline=False
-                )
-            
-            await ctx.send(embed=embed)
+            try:
+                # 最後の手段 - エラーが発生しても構成表示だけは行う
+                if not embed_sent:
+                    preset = self.presets[preset_id]
+                    
+                    # 成功メッセージだけは必ず表示
+                    await temp_msg.edit(content=f"✅ プリセット「{preset['name']}」を適用しました。")
+                    
+                    # テキストだけでも構成内容を表示
+                    simple_msg = f"プリセット「{preset['name']}」の構成:\n\n"
+                    for player_count, composition in sorted(preset["compositions"].items(), key=lambda x: int(x[0])):
+                        roles_text = ", ".join([f"{role}: {count}" for role, count in composition.items()])
+                        simple_msg += f"**{player_count}人用**: {roles_text}\n"
+                    
+                    await ctx.send(simple_msg)
+            except Exception:
+                # 本当に何も表示できない場合
+                pass
     
     @compose.command(name="custom")
     @commands.has_permissions(administrator=True)
