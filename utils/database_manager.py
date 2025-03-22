@@ -33,31 +33,51 @@ class DatabaseManager(commands.Cog):
         settings_path = f"{self.config_dir}/server_{guild_id}.json"
         
         # デバッグ用ログを追加
-        print(f"Loading settings for guild {guild_id} from {settings_path}")
+        print(f"[DATABASE] Loading settings for guild {guild_id} from {settings_path}")
+        
+        # デフォルト設定を事前に取得
+        default_settings = self._get_default_settings()
+        print(f"[DATABASE] Default settings type: {type(default_settings)}")
         
         if os.path.exists(settings_path):
             try:
                 async with self.settings_lock:
                     with open(settings_path, "r", encoding="utf-8") as f:
                         result = json.load(f)
+                        
                         # デバッグログを追加
-                        print(f"Loaded settings: {type(result)}")
+                        print(f"[DATABASE] Loaded settings: {type(result)}")
+                        
+                        # 辞書型でない場合は例外を発生させる
+                        if not isinstance(result, dict):
+                            print(f"[DATABASE] ERROR: Loaded settings is not a dict: {type(result)}")
+                            return default_settings
+                        
                         return result
-            except json.JSONDecodeError:
+            except json.JSONDecodeError as e:
                 # ファイルが破損している場合、デフォルト設定を返す
-                default = self._get_default_settings()
-                print(f"JSON decode error, returning default: {type(default)}")
-                return default
+                print(f"[DATABASE] JSON decode error: {e}. Returning default settings")
+                return default_settings
             except Exception as e:
-                print(f"設定読み込みエラー: {e}")
-                default = self._get_default_settings() 
-                print(f"Error occurred, returning default: {type(default)}")
-                return default
+                # その他のエラーが発生した場合も、デフォルト設定を返す
+                print(f"[DATABASE] Error loading settings: {e}")
+                import traceback
+                traceback.print_exc()
+                return default_settings
         else:
             # 設定ファイルが存在しない場合、デフォルト設定を返す
-            default = self._get_default_settings()
-            print(f"Settings file not found, returning default: {type(default)}")
-            return default
+            print(f"[DATABASE] Settings file not found, returning default settings")
+            
+            # 新しいサーバーの場合は設定ファイルを作成しておく
+            try:
+                async with self.settings_lock:
+                    with open(settings_path, "w", encoding="utf-8") as f:
+                        json.dump(default_settings, f, ensure_ascii=False, indent=2)
+                print(f"[DATABASE] Created new settings file for guild {guild_id}")
+            except Exception as e:
+                print(f"[DATABASE] Error creating settings file: {e}")
+            
+            return default_settings
     
     async def update_server_setting(self, guild_id, key, value):
         """サーバーの特定の設定を更新"""
@@ -65,28 +85,34 @@ class DatabaseManager(commands.Cog):
         settings_path = f"{self.config_dir}/server_{guild_id}.json"
         
         try:
-            print(f"Updating setting for guild {guild_id}, key: {key}")
+            print(f"[DATABASE] Updating setting for guild {guild_id}, key: {key}")
             # 現在の設定を取得
             settings = await self.get_server_settings(guild_id)
-            print(f"Current settings type: {type(settings)}")
+            print(f"[DATABASE] Current settings type: {type(settings)}")
             
             # 例外ケースをチェック
             if asyncio.iscoroutine(settings):
-                print("Warning: settings is still a coroutine in update_server_setting, awaiting again")
+                print("[DATABASE] Warning: settings is still a coroutine in update_server_setting, awaiting again")
                 settings = await settings
+                print(f"[DATABASE] After second await, settings type: {type(settings)}")
+            
+            # 設定が辞書型でない場合は新しい辞書を作成
+            if not isinstance(settings, dict):
+                print(f"[DATABASE] Settings is not a dict, creating new settings")
+                settings = self._get_default_settings()
             
             # 設定を更新
             settings[key] = value
             
             # 設定を保存
-            print(f"Saving updated settings to {settings_path}")
+            print(f"[DATABASE] Saving updated settings to {settings_path}")
             async with self.settings_lock:
                 with open(settings_path, "w", encoding="utf-8") as f:
                     json.dump(settings, f, ensure_ascii=False, indent=2)
             
             return True
         except Exception as e:
-            print(f"設定更新エラー: {e}")
+            print(f"[DATABASE] 設定更新エラー: {e}")
             import traceback
             traceback.print_exc()
             return False

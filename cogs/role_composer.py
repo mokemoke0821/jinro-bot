@@ -6,6 +6,7 @@ import discord
 from discord.ext import commands
 import json
 import asyncio
+import traceback
 
 class RoleComposerCog(commands.Cog):
     """役職構成をカスタマイズするコグ"""
@@ -123,55 +124,101 @@ class RoleComposerCog(commands.Cog):
     @commands.has_permissions(administrator=True)
     async def apply_preset(self, ctx, preset_id: str):
         """プリセット構成を適用"""
+        # プリセットの存在確認
         if preset_id not in self.presets:
             preset_names = ", ".join(f"`{pid}`" for pid in self.presets.keys())
             await ctx.send(f"プリセット `{preset_id}` は存在しません。有効なプリセット: {preset_names}")
             return
         
+        # 一時的な応答メッセージ
+        temp_msg = await ctx.send(f"プリセット `{preset_id}` を適用中...")
+        
         # データベース更新
         db_manager = self.bot.get_cog("DatabaseManager")
         if not db_manager:
-            await ctx.send("DatabaseManagerが見つかりません。")
+            await temp_msg.edit(content="エラー: DatabaseManagerが見つかりません。")
             return
         
         # デバッグ情報を追加
-        print(f"Database manager type: {type(db_manager)}")
-        print(f"Applying preset: {preset_id}")
+        print(f"[COMPOSE] Database manager type: {type(db_manager)}")
+        print(f"[COMPOSE] Applying preset: {preset_id}")
+        print(f"[COMPOSE] Server ID: {ctx.guild.id}")
         
         try:
+            # DatabaseManagerのメソッド情報を確認
+            print(f"[COMPOSE] Available methods: {[method for method in dir(db_manager) if not method.startswith('_')]}")
+            
             # 設定取得部分を例外処理で囲む
+            print(f"[COMPOSE] Calling get_server_settings...")
             settings = await db_manager.get_server_settings(str(ctx.guild.id))
-            print(f"Retrieved settings type: {type(settings)}")
+            print(f"[COMPOSE] Retrieved settings: {settings}")
+            print(f"[COMPOSE] Retrieved settings type: {type(settings)}")
             
             # 例外ケースをチェック
-            if asyncio.iscoroutine(settings):
-                print("Warning: settings is still a coroutine, awaiting again")
-                settings = await settings
-                print(f"After second await, settings type: {type(settings)}")
-            
             if not isinstance(settings, dict):
-                print(f"Error: settings is not a dict: {type(settings)}")
-                await ctx.send("設定の取得に失敗しました。管理者に連絡してください。")
-                return
-                
-            roles_config = settings.get("roles_config", {})
+                print(f"[COMPOSE] Error: settings is not a dict: {type(settings)}")
+                await temp_msg.edit(content="エラー: 設定が正しく取得できませんでした。デフォルト設定を使用します。")
+                # デフォルト設定を使用
+                settings = {
+                    "roles_config": {},
+                    "game_rules": {
+                        "no_first_night_kill": False,
+                        "lovers_enabled": False,
+                        "no_consecutive_guard": True,
+                        "random_tied_vote": False,
+                        "dead_chat_enabled": True
+                    },
+                    "timers": {
+                        "day": 300,
+                        "night": 90,
+                        "voting": 60
+                    }
+                }
+            
+            # roles_configキーが存在しない場合は作成
+            if "roles_config" not in settings:
+                settings["roles_config"] = {}
+            
+            roles_config = settings["roles_config"]
             
             # プリセットの構成をコピー
             preset = self.presets[preset_id]
             for player_count, composition in preset["compositions"].items():
                 roles_config[player_count] = composition
             
-            # 設定を保存
-            await db_manager.update_server_setting(str(ctx.guild.id), "roles_config", roles_config)
+            print(f"[COMPOSE] Updated roles_config: {roles_config}")
             
-            # 確認メッセージを送信
-            await ctx.send(f"プリセット「{preset['name']}」を適用しました。")
+            # 設定を保存
+            success = await db_manager.update_server_setting(str(ctx.guild.id), "roles_config", roles_config)
+            
+            if success:
+                # 確認メッセージを送信
+                await temp_msg.edit(content=f"✅ プリセット「{preset['name']}」を適用しました。")
+                
+                # 具体的な構成内容を表示
+                embed = discord.Embed(
+                    title=f"プリセット「{preset['name']}」の構成",
+                    description=f"{preset['description']}",
+                    color=discord.Color.green()
+                )
+                
+                for player_count, composition in sorted(preset["compositions"].items(), key=lambda x: int(x[0])):
+                    roles_text = ", ".join([f"{role}: {count}" for role, count in composition.items()])
+                    embed.add_field(
+                        name=f"{player_count}人用",
+                        value=roles_text,
+                        inline=False
+                    )
+                
+                await ctx.send(embed=embed)
+            else:
+                await temp_msg.edit(content=f"⚠️ プリセットの適用中にエラーが発生しました。詳細はログを確認してください。")
+                
         except Exception as e:
             # 例外情報を詳細に出力
-            import traceback
-            print(f"Error in apply_preset: {e}")
+            print(f"[COMPOSE] Error in apply_preset: {e}")
             traceback.print_exc()
-            await ctx.send(f"エラーが発生しました: {str(e)}")
+            await temp_msg.edit(content=f"⚠️ エラーが発生しました: {str(e)}")
     
     @compose.command(name="custom")
     @commands.has_permissions(administrator=True)
@@ -217,43 +264,62 @@ class RoleComposerCog(commands.Cog):
                 await ctx.send(f"役職バランスに問題があります:\n{warning}\n\nそれでも設定を続行する場合は `!compose force {player_count} ...` を使用してください。")
                 return
         
+        # 一時的な応答メッセージ
+        temp_msg = await ctx.send(f"{player_count}人用の役職構成を設定中...")
+        
         # データベース更新
         db_manager = self.bot.get_cog("DatabaseManager")
         if not db_manager:
-            await ctx.send("DatabaseManagerが見つかりません。")
+            await temp_msg.edit(content="エラー: DatabaseManagerが見つかりません。")
             return
         
         try:
-            # 設定取得部分を例外処理で囲む
+            # 設定取得
             settings = await db_manager.get_server_settings(str(ctx.guild.id))
-            print(f"Custom composition - Retrieved settings type: {type(settings)}")
+            print(f"[COMPOSE] Custom composition - Retrieved settings type: {type(settings)}")
             
             # 例外ケースをチェック
-            if asyncio.iscoroutine(settings):
-                print("Warning: settings is still a coroutine in set_custom_composition, awaiting again")
-                settings = await settings
-                print(f"After second await, settings type: {type(settings)}")
-            
             if not isinstance(settings, dict):
-                print(f"Error: settings is not a dict: {type(settings)}")
-                await ctx.send("設定の取得に失敗しました。管理者に連絡してください。")
-                return
+                print(f"[COMPOSE] Error: settings is not a dict: {type(settings)}")
+                # デフォルト設定を使用
+                settings = {
+                    "roles_config": {},
+                    "game_rules": {
+                        "no_first_night_kill": False,
+                        "lovers_enabled": False,
+                        "no_consecutive_guard": True,
+                        "random_tied_vote": False,
+                        "dead_chat_enabled": True
+                    },
+                    "timers": {
+                        "day": 300,
+                        "night": 90,
+                        "voting": 60
+                    }
+                }
+            
+            # roles_configキーが存在しない場合は作成
+            if "roles_config" not in settings:
+                settings["roles_config"] = {}
                 
-            roles_config = settings.get("roles_config", {})
+            roles_config = settings["roles_config"]
             
             # 構成を保存
             roles_config[str(player_count)] = composition
-            await db_manager.update_server_setting(str(ctx.guild.id), "roles_config", roles_config)
+            success = await db_manager.update_server_setting(str(ctx.guild.id), "roles_config", roles_config)
             
-            # 確認メッセージを送信
-            roles_text = "\n".join([f"- {role}: {count}人" for role, count in composition.items()])
-            await ctx.send(f"{player_count}人用のカスタム役職構成を設定しました：\n{roles_text}")
+            if success:
+                # 確認メッセージを送信
+                roles_text = "\n".join([f"- {role}: {count}人" for role, count in composition.items()])
+                await temp_msg.edit(content=f"✅ {player_count}人用のカスタム役職構成を設定しました：\n{roles_text}")
+            else:
+                await temp_msg.edit(content=f"⚠️ 役職構成の設定中にエラーが発生しました。詳細はログを確認してください。")
+            
         except Exception as e:
             # 例外情報を詳細に出力
-            import traceback
-            print(f"Error in set_custom_composition: {e}")
+            print(f"[COMPOSE] Error in set_custom_composition: {e}")
             traceback.print_exc()
-            await ctx.send(f"エラーが発生しました: {str(e)}")
+            await temp_msg.edit(content=f"⚠️ エラーが発生しました: {str(e)}")
     
     @compose.command(name="force")
     @commands.has_permissions(administrator=True)
@@ -291,82 +357,103 @@ class RoleComposerCog(commands.Cog):
             return
         
         # 警告表示（強制設定なので実行はブロックしない）
+        warnings = []
         role_balancer = self.bot.get_cog("RoleBalancer")
         if role_balancer:
             balance_check = role_balancer.check_balance(composition)
             if not balance_check["balanced"]:
-                warning = "\n".join(balance_check["warnings"])
-                await ctx.send(f"⚠️ **警告**: 以下の問題がありますが、強制設定します。\n{warning}")
+                warnings = balance_check["warnings"]
+                warning_text = "\n".join(warnings)
+                await ctx.send(f"⚠️ **警告**: 以下の問題がありますが、強制設定します。\n{warning_text}")
+        
+        # 一時的な応答メッセージ
+        temp_msg = await ctx.send(f"{player_count}人用の役職構成を強制設定中...")
         
         # データベース更新
         db_manager = self.bot.get_cog("DatabaseManager")
         if not db_manager:
-            await ctx.send("DatabaseManagerが見つかりません。")
+            await temp_msg.edit(content="エラー: DatabaseManagerが見つかりません。")
             return
         
         try:
-            # 設定取得部分を例外処理で囲む
+            # 設定取得
             settings = await db_manager.get_server_settings(str(ctx.guild.id))
-            print(f"Force composition - Retrieved settings type: {type(settings)}")
+            print(f"[COMPOSE] Force composition - Retrieved settings type: {type(settings)}")
             
             # 例外ケースをチェック
-            if asyncio.iscoroutine(settings):
-                print("Warning: settings is still a coroutine in force_custom_composition, awaiting again")
-                settings = await settings
-                print(f"After second await, settings type: {type(settings)}")
-            
             if not isinstance(settings, dict):
-                print(f"Error: settings is not a dict: {type(settings)}")
-                await ctx.send("設定の取得に失敗しました。管理者に連絡してください。")
-                return
+                print(f"[COMPOSE] Error: settings is not a dict: {type(settings)}")
+                # デフォルト設定を使用
+                settings = {
+                    "roles_config": {},
+                    "game_rules": {
+                        "no_first_night_kill": False,
+                        "lovers_enabled": False,
+                        "no_consecutive_guard": True,
+                        "random_tied_vote": False,
+                        "dead_chat_enabled": True
+                    },
+                    "timers": {
+                        "day": 300,
+                        "night": 90,
+                        "voting": 60
+                    }
+                }
+            
+            # roles_configキーが存在しない場合は作成
+            if "roles_config" not in settings:
+                settings["roles_config"] = {}
                 
-            roles_config = settings.get("roles_config", {})
+            roles_config = settings["roles_config"]
             
             # 構成を保存
             roles_config[str(player_count)] = composition
-            await db_manager.update_server_setting(str(ctx.guild.id), "roles_config", roles_config)
+            success = await db_manager.update_server_setting(str(ctx.guild.id), "roles_config", roles_config)
             
-            # 確認メッセージを送信
-            roles_text = "\n".join([f"- {role}: {count}人" for role, count in composition.items()])
-            await ctx.send(f"⚠️ {player_count}人用のカスタム役職構成を強制設定しました：\n{roles_text}")
+            if success:
+                # 確認メッセージを送信
+                roles_text = "\n".join([f"- {role}: {count}人" for role, count in composition.items()])
+                warning_icon = "⚠️ " if warnings else ""
+                await temp_msg.edit(content=f"{warning_icon}{player_count}人用のカスタム役職構成を強制設定しました：\n{roles_text}")
+            else:
+                await temp_msg.edit(content=f"⚠️ 役職構成の設定中にエラーが発生しました。詳細はログを確認してください。")
+            
         except Exception as e:
             # 例外情報を詳細に出力
-            import traceback
-            print(f"Error in force_custom_composition: {e}")
+            print(f"[COMPOSE] Error in force_custom_composition: {e}")
             traceback.print_exc()
-            await ctx.send(f"エラーが発生しました: {str(e)}")
+            await temp_msg.edit(content=f"⚠️ エラーが発生しました: {str(e)}")
     
     @compose.command(name="show")
     async def show_composition(self, ctx, player_count: int = None):
         """現在の役職構成を表示"""
+        # 一時的な応答メッセージ
+        temp_msg = await ctx.send("役職構成を取得中...")
+        
         db_manager = self.bot.get_cog("DatabaseManager")
         if not db_manager:
-            await ctx.send("DatabaseManagerが見つかりません。")
+            await temp_msg.edit(content="エラー: DatabaseManagerが見つかりません。")
             return
         
         try:
-            # 設定取得部分を例外処理で囲む
+            # 設定取得
             settings = await db_manager.get_server_settings(str(ctx.guild.id))
-            print(f"Show composition - Retrieved settings type: {type(settings)}")
+            print(f"[COMPOSE] Show composition - Retrieved settings type: {type(settings)}")
             
             # 例外ケースをチェック
-            if asyncio.iscoroutine(settings):
-                print("Warning: settings is still a coroutine in show_composition, awaiting again")
-                settings = await settings
-                print(f"After second await, settings type: {type(settings)}")
-            
             if not isinstance(settings, dict):
-                print(f"Error: settings is not a dict: {type(settings)}")
-                await ctx.send("設定の取得に失敗しました。管理者に連絡してください。")
+                print(f"[COMPOSE] Error: settings is not a dict: {type(settings)}")
+                await temp_msg.edit(content="エラー: 設定が正しく取得できませんでした。")
                 return
-                
+            
+            # roles_configキーが存在しない場合は空の辞書を使用
             roles_config = settings.get("roles_config", {})
             
             if player_count is not None:
                 # 指定人数の構成を表示
                 player_count_str = str(player_count)
                 if player_count_str not in roles_config:
-                    await ctx.send(f"{player_count}人用の役職構成は設定されていません。")
+                    await temp_msg.edit(content=f"{player_count}人用の役職構成は設定されていません。")
                     return
                 
                 composition = roles_config[player_count_str]
@@ -378,6 +465,7 @@ class RoleComposerCog(commands.Cog):
                 roles_text = "\n".join([f"- {role}: {count}人" for role, count in composition.items()])
                 embed.description = roles_text
                 
+                await temp_msg.delete()
                 await ctx.send(embed=embed)
             else:
                 # すべての人数の構成を表示
@@ -389,6 +477,7 @@ class RoleComposerCog(commands.Cog):
                 
                 if not roles_config:
                     embed.description = "役職構成が設定されていません。"
+                    await temp_msg.delete()
                     await ctx.send(embed=embed)
                     return
                 
@@ -400,13 +489,13 @@ class RoleComposerCog(commands.Cog):
                         inline=False
                     )
                 
+                await temp_msg.delete()
                 await ctx.send(embed=embed)
         except Exception as e:
             # 例外情報を詳細に出力
-            import traceback
-            print(f"Error in show_composition: {e}")
+            print(f"[COMPOSE] Error in show_composition: {e}")
             traceback.print_exc()
-            await ctx.send(f"エラーが発生しました: {str(e)}")
+            await temp_msg.edit(content=f"⚠️ エラーが発生しました: {str(e)}")
     
     @compose.command(name="recommend")
     async def recommend_composition(self, ctx, player_count: int):
@@ -415,36 +504,46 @@ class RoleComposerCog(commands.Cog):
             await ctx.send("プレイヤー数は5人以上である必要があります。")
             return
         
+        # 一時的な応答メッセージ
+        temp_msg = await ctx.send(f"{player_count}人用の推奨役職構成を計算中...")
+        
         role_balancer = self.bot.get_cog("RoleBalancer")
         if not role_balancer:
-            await ctx.send("RoleBalancerが見つかりません。")
+            await temp_msg.edit(content="エラー: RoleBalancerが見つかりません。")
             return
         
-        # 推奨構成を取得
-        recommended = role_balancer.get_recommended_composition(player_count)
-        if not recommended:
-            await ctx.send(f"{player_count}人用の推奨構成が見つかりません。")
-            return
-        
-        # 提案を表示
-        embed = discord.Embed(
-            title=f"{player_count}人用の推奨役職構成",
-            description="以下の役職構成をおすすめします。",
-            color=discord.Color.green()
-        )
-        
-        roles_text = "\n".join([f"- {role}: {count}人" for role, count in recommended.items()])
-        embed.description = f"以下の役職構成をおすすめします：\n\n{roles_text}"
-        
-        # 適用用のコマンド例を追加
-        cmd_example = "!compose custom " + str(player_count) + " " + " ".join([f"{role} {count}" for role, count in recommended.items()])
-        embed.add_field(
-            name="この構成を適用するには",
-            value=f"以下のコマンドを使用してください：\n`{cmd_example}`",
-            inline=False
-        )
-        
-        await ctx.send(embed=embed)
+        try:
+            # 推奨構成を取得
+            recommended = role_balancer.get_recommended_composition(player_count)
+            if not recommended:
+                await temp_msg.edit(content=f"{player_count}人用の推奨構成が見つかりません。")
+                return
+            
+            # 提案を表示
+            embed = discord.Embed(
+                title=f"{player_count}人用の推奨役職構成",
+                description="以下の役職構成をおすすめします。",
+                color=discord.Color.green()
+            )
+            
+            roles_text = "\n".join([f"- {role}: {count}人" for role, count in recommended.items()])
+            embed.description = f"以下の役職構成をおすすめします：\n\n{roles_text}"
+            
+            # 適用用のコマンド例を追加
+            cmd_example = "!compose custom " + str(player_count) + " " + " ".join([f"{role} {count}" for role, count in recommended.items()])
+            embed.add_field(
+                name="この構成を適用するには",
+                value=f"以下のコマンドを使用してください：\n`{cmd_example}`",
+                inline=False
+            )
+            
+            await temp_msg.delete()
+            await ctx.send(embed=embed)
+        except Exception as e:
+            # 例外情報を詳細に出力
+            print(f"[COMPOSE] Error in recommend_composition: {e}")
+            traceback.print_exc()
+            await temp_msg.edit(content=f"⚠️ エラーが発生しました: {str(e)}")
 
 async def setup(bot):
     await bot.add_cog(RoleComposerCog(bot))
