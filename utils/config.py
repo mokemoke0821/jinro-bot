@@ -21,16 +21,97 @@ class GameConfig:
     PREFIX = "!"
     
     # ゲーム設定のデフォルト値
-    DEFAULT_DAY_TIME = 300  # 昼フェーズの時間（秒）
+    DEFAULT_DAY_TIME = 300   # 昼フェーズの時間（秒）
     DEFAULT_NIGHT_TIME = 90  # 夜フェーズの時間（秒）
+    DEFAULT_VOTE_TIME = 60   # 投票フェーズの時間（秒）
     MIN_PLAYERS = 4  # 最小プレイヤー数
     MAX_PLAYERS = 15  # 最大プレイヤー数
+    
+    # フェーズ時間設定（秒）
+    DAY_PHASE_TIME = 300    # 昼フェーズの時間
+    NIGHT_PHASE_TIME = 90   # 夜フェーズの時間
+    VOTE_TIME = 60          # 投票フェーズの時間
     
     # ディレクトリパス
     DATA_DIR = "data"
     CONFIG_DIR = os.path.join(DATA_DIR, "config")
     STATS_DIR = os.path.join(DATA_DIR, "stats")
     LOG_DIR = os.path.join(DATA_DIR, "logs")
+    
+    @classmethod
+    def get_role_distribution(cls, player_count):
+        """プレイヤー数に応じた役職の割り当て数を返す"""
+        # 標準的な役職構成
+        if player_count <= 5:
+            return {
+                "村人": 2,
+                "人狼": 1,
+                "占い師": 1,
+                "狩人": 1
+            }
+        elif player_count == 6:
+            return {
+                "村人": 2,
+                "人狼": 1,
+                "占い師": 1,
+                "狩人": 1,
+                "狂人": 1
+            }
+        elif player_count == 7:
+            return {
+                "村人": 3,
+                "人狼": 1,
+                "占い師": 1,
+                "狩人": 1,
+                "狂人": 1
+            }
+        elif player_count == 8:
+            return {
+                "村人": 3,
+                "人狼": 2,
+                "占い師": 1,
+                "狩人": 1,
+                "狂人": 1
+            }
+        elif player_count == 9:
+            return {
+                "村人": 3,
+                "人狼": 2,
+                "占い師": 1,
+                "狩人": 1,
+                "狂人": 1,
+                "霊能者": 1
+            }
+        elif player_count == 10:
+            return {
+                "村人": 3,
+                "人狼": 2,
+                "占い師": 1,
+                "狩人": 1,
+                "狂人": 1,
+                "霊能者": 1,
+                "妖狐": 1
+            }
+        elif player_count == 11:
+            return {
+                "村人": 4,
+                "人狼": 2,
+                "占い師": 1,
+                "狩人": 1,
+                "狂人": 1,
+                "霊能者": 1,
+                "妖狐": 1
+            }
+        else:  # 12人以上
+            return {
+                "村人": 4,
+                "人狼": 3,
+                "占い師": 1,
+                "狩人": 1,
+                "狂人": 1,
+                "霊能者": 1,
+                "妖狐": 1
+            }
 
 class ConfigManager:
     """サーバーごとの設定を管理するクラス"""

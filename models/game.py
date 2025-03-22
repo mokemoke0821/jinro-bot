@@ -90,18 +90,20 @@ class Game:
             self.day_count = 1
         elif self.phase == "night":
             self.phase = "day"
-            self.process_night_actions()
+            # この段階では process_night_actions() は呼ばない（night_actions.pyで呼び出す）
         elif self.phase == "day":
             self.phase = "voting"
         elif self.phase == "voting":
             self.phase = "night"
-            self.process_voting()
+            # この段階では process_voting() は呼ばない（voting.pyで呼び出す）
             self.day_count += 1
             self.reset_night_actions()
     
     def process_night_actions(self):
         """夜のアクションを処理"""
         # 人狼の襲撃処理
+        self.last_killed = None  # 最後に殺されたプレイヤーをリセット
+        
         if self.wolf_target:
             target_id = self.wolf_target
             target_player = self.players.get(str(target_id))
@@ -120,17 +122,19 @@ class Game:
                     target_player.kill()
                     self.last_killed = str(target_id)
                     
-                    # プレイヤーが死亡した場合、霊界チャットの権限を更新
-                    if hasattr(self, 'dead_chat_channel_id') and self.special_rules.dead_chat_enabled:
-                        guild = self.bot.get_guild(int(self.guild_id))
-                        if guild:
-                            game_manager = self.bot.get_cog("GameManagementCog")
-                            if game_manager:
-                                # 非同期でパーミッション更新
-                                import asyncio
-                                asyncio.create_task(game_manager.update_dead_chat_permissions(guild, self, target_player))
-                
-        # 状態リセット
+                    # 霊界チャットの権限更新は非同期で行う必要があるため、
+                    # night_actions.py側でasyncioタスクとして実行している
+        
+        # 妖狐の占い死亡処理
+        if self.killed_by_divination:
+            fox_player = self.players.get(str(self.killed_by_divination))
+            if fox_player and fox_player.is_alive:
+                fox_player.kill()
+                # last_killedが設定されていない場合のみ設定（人狼の襲撃より優先度低）
+                if not self.last_killed:
+                    self.last_killed = str(self.killed_by_divination)
+        
+        # 次の夜に備えて状態リセット (last_killedとkilled_by_divinationは保持)
         self.wolf_target = None
         self.protected_target = None
     
@@ -229,20 +233,23 @@ class Game:
         self.remaining_time = seconds
         
         # タイマー処理
-        while self.remaining_time > 0:
-            if update_callback:
-                await update_callback(self.remaining_time)
+        try:
+            while self.remaining_time > 0:
+                if update_callback:
+                    await update_callback(self.remaining_time)
+                
+                await asyncio.sleep(1)
+                self.remaining_time -= 1
             
-            await asyncio.sleep(1)
-            self.remaining_time -= 1
-        
-        # タイマー完了
-        if complete_callback:
-            await complete_callback()
+            # タイマー完了
+            if complete_callback:
+                await complete_callback()
+        except asyncio.CancelledError:
+            print("タイマーがキャンセルされました")
     
     def cancel_timer(self):
         """タイマーをキャンセル"""
-        if self.timer:
+        if self.timer and not self.timer.done():
             self.timer.cancel()
             self.timer = None
         
