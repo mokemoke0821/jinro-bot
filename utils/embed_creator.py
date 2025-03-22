@@ -4,6 +4,41 @@ DiscordのEmbed作成ユーティリティ
 import discord
 from utils.config import EmbedColors
 
+# 他のコグから直接参照されるエクスポートされた関数とクラス
+__all__ = [
+    'EmbedCreator',
+    'create_base_embed',
+    'create_game_status_embed',
+    'create_role_embed',
+    'create_night_action_embed',
+    'create_divination_result_embed',
+    'create_night_result_embed',
+    'create_help_embed'
+]
+
+class EmbedCreator:
+    """Embedを作成するためのユーティリティクラス"""
+    
+    def create_base_embed(self, title, description, color):
+        """基本的なEmbedを作成"""
+        return create_base_embed(title, description, color)
+    
+    def create_info_embed(self, title, description):
+        """情報用のEmbedを作成"""
+        return create_base_embed(title, description, EmbedColors.INFO)
+    
+    def create_success_embed(self, title, description):
+        """成功通知用のEmbedを作成"""
+        return create_base_embed(title, description, EmbedColors.SUCCESS)
+    
+    def create_warning_embed(self, title, description):
+        """警告用のEmbedを作成"""
+        return create_base_embed(title, description, EmbedColors.WARNING)
+    
+    def create_error_embed(self, title, description):
+        """エラー用のEmbedを作成"""
+        return create_base_embed(title, description, EmbedColors.ERROR)
+
 def create_base_embed(title, description, color):
     """基本的なEmbedを作成"""
     embed = discord.Embed(

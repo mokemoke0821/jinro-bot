@@ -504,4 +504,86 @@ class AdminCommands(commands.Cog):
                 await ctx.send(f"無効な役職設定です。有効な役職設定: {setting_list}", ephemeral=True)
                 return
             
-            # roles
+            # roles辞書が存在しない場合は作成
+            if "roles" not in server_config:
+                server_config["roles"] = {}
+            
+            # 役職設定が存在しない場合は作成
+            if role_name not in server_config["roles"]:
+                server_config["roles"][role_name] = {}
+            
+            # 設定値を更新
+            if role_setting == "enabled":
+                if value.lower() in ["true", "yes", "on", "1"]:
+                    server_config["roles"][role_name]["enabled"] = True
+                elif value.lower() in ["false", "no", "off", "0"]:
+                    server_config["roles"][role_name]["enabled"] = False
+                else:
+                    await ctx.send("ブール値設定には true/false, yes/no, on/off, 1/0 のいずれかを入力してください。", ephemeral=True)
+                    return
+            else:  # min_count または max_count
+                try:
+                    count_value = int(value)
+                    if count_value < 0:
+                        await ctx.send("値は0以上の整数でなければなりません。", ephemeral=True)
+                        return
+                    
+                    server_config["roles"][role_name][role_setting] = count_value
+                except ValueError:
+                    await ctx.send("数値設定には整数を入力してください。", ephemeral=True)
+                    return
+        
+        # 設定を保存
+        self.config.save_server_config(ctx.guild.id, server_config)
+        
+        # ログに記録
+        self.log_manager.log_admin_action(None, ctx.author.id, "update_config", 
+                                        f"設定 {setting} を {value} に変更しました")
+        
+        await ctx.send(f"設定 **{setting}** を **{value}** に更新しました。", ephemeral=True)
+    
+    @admin_config.command(name="reset", description="設定をデフォルトに戻す")
+    async def reset_config(self, ctx, setting: Optional[str] = None):
+        if setting:
+            # 特定の設定のみリセット
+            server_config = self.config.get_server_config(ctx.guild.id)
+            
+            if setting in server_config:
+                del server_config[setting]
+                self.config.save_server_config(ctx.guild.id, server_config)
+                
+                # ログに記録
+                self.log_manager.log_admin_action(None, ctx.author.id, "reset_config", 
+                                                f"設定 {setting} をデフォルトに戻しました")
+                
+                await ctx.send(f"設定 **{setting}** をデフォルトに戻しました。", ephemeral=True)
+            else:
+                await ctx.send(f"設定 **{setting}** は存在しません。", ephemeral=True)
+        else:
+            # すべての設定をリセット
+            confirm_msg = await ctx.send("すべての設定をデフォルトに戻しますか？現在の設定はすべて失われます。続行する場合は ✅ を、キャンセルする場合は ❌ をクリックしてください。", ephemeral=True)
+            await confirm_msg.add_reaction("✅")
+            await confirm_msg.add_reaction("❌")
+            
+            def check(reaction, user):
+                return user == ctx.author and str(reaction.emoji) in ["✅", "❌"] and reaction.message.id == confirm_msg.id
+            
+            try:
+                reaction, user = await self.bot.wait_for('reaction_add', timeout=60.0, check=check)
+                if str(reaction.emoji) == "✅":
+                    # 設定をリセット
+                    self.config.reset_server_config(ctx.guild.id)
+                    
+                    # ログに記録
+                    self.log_manager.log_admin_action(None, ctx.author.id, "reset_all_config", 
+                                                    "すべての設定をデフォルトに戻しました")
+                    
+                    await ctx.send("すべての設定をデフォルトに戻しました。", ephemeral=True)
+                else:
+                    await ctx.send("操作をキャンセルしました。", ephemeral=True)
+            except asyncio.TimeoutError:
+                await ctx.send("タイムアウトしました。操作はキャンセルされました。", ephemeral=True)
+
+
+async def setup(bot):
+    await bot.add_cog(AdminCommands(bot))

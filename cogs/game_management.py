@@ -46,6 +46,7 @@ class GameManagementCog(commands.Cog):
         
         # 新しいゲームを作成
         game = Game(ctx.guild.id, ctx.channel.id, ctx.author.id)
+        game.bot = self.bot  # Botインスタンスを設定
         self.games[str(ctx.guild.id)] = game
         
         # 開始者を自動的に参加者として追加
@@ -123,6 +124,9 @@ class GameManagementCog(commands.Cog):
         if len(game.players) < 5:
             await ctx.send("ゲームを開始するには最低5人の参加者が必要です。")
             return
+            
+        # Botインスタンスを設定
+        game.bot = self.bot
         
         # 役職を割り当ててゲーム開始
         success, error_msg = game.start_game()

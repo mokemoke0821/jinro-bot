@@ -3,8 +3,6 @@ import json
 import datetime
 from typing import Dict, Any, List, Optional, Tuple
 import discord
-import matplotlib.pyplot as plt
-import io
 from collections import defaultdict, Counter
 
 class StatsManager:
@@ -17,6 +15,17 @@ class StatsManager:
         self.server_stats_file = f"{self.stats_directory}/server_stats.json"
         self.ensure_stats_directory()
         self.ensure_stats_files()
+        
+        # matplotlibが利用可能かチェック
+        self.matplotlib_available = False
+        try:
+            import matplotlib.pyplot as plt
+            import io
+            self.plt = plt
+            self.io = io
+            self.matplotlib_available = True
+        except ImportError:
+            print("matplotlib is not available. Charts will not be generated.")
     
     def ensure_stats_directory(self):
         """統計ディレクトリが存在することを確認"""
@@ -388,14 +397,17 @@ class StatsManager:
     
     async def generate_role_stats_chart(self, guild_id: int) -> Optional[discord.File]:
         """役職ごとの勝率を示す棒グラフを生成する"""
+        if not self.matplotlib_available:
+            return None
+            
         stats = await self.get_server_stats(guild_id)
         
         if not stats["role_stats"]:
             return None
         
         # matplotlib の設定
-        plt.figure(figsize=(10, 6))
-        plt.style.use('dark_background')
+        self.plt.figure(figsize=(10, 6))
+        self.plt.style.use('dark_background')
         
         roles = []
         win_rates = []
@@ -414,51 +426,54 @@ class StatsManager:
         
         # グラフを描画
         bar_colors = ['green' if rate >= 50 else 'red' for rate in win_rates]
-        bars = plt.bar(roles, win_rates, color=bar_colors)
+        bars = self.plt.bar(roles, win_rates, color=bar_colors)
         
         # グラフの装飾
-        plt.title('役職別勝率', fontsize=16)
-        plt.xlabel('役職', fontsize=12)
-        plt.ylabel('勝率 (%)', fontsize=12)
-        plt.ylim(0, 100)
-        plt.grid(axis='y', alpha=0.3)
+        self.plt.title('役職別勝率', fontsize=16)
+        self.plt.xlabel('役職', fontsize=12)
+        self.plt.ylabel('勝率 (%)', fontsize=12)
+        self.plt.ylim(0, 100)
+        self.plt.grid(axis='y', alpha=0.3)
         
         # 出現回数を各バーの上に表示
         for bar, appearance in zip(bars, appearances):
             height = bar.get_height()
-            plt.text(bar.get_x() + bar.get_width()/2., height + 1,
+            self.plt.text(bar.get_x() + bar.get_width()/2., height + 1,
                     f'{appearance}回',
                     ha='center', va='bottom', rotation=0, fontsize=8)
         
         # 勝率の値を各バーの中に表示
         for bar, rate in zip(bars, win_rates):
             height = bar.get_height()
-            plt.text(bar.get_x() + bar.get_width()/2., height / 2,
+            self.plt.text(bar.get_x() + bar.get_width()/2., height / 2,
                     f'{rate:.1f}%',
                     ha='center', va='center', color='white', fontweight='bold')
         
         # x軸のラベルが重ならないように調整
-        plt.xticks(rotation=45, ha='right')
-        plt.tight_layout()
+        self.plt.xticks(rotation=45, ha='right')
+        self.plt.tight_layout()
         
         # ファイルとして保存
-        buf = io.BytesIO()
-        plt.savefig(buf, format='png')
+        buf = self.io.BytesIO()
+        self.plt.savefig(buf, format='png')
         buf.seek(0)
-        plt.close()
+        self.plt.close()
         
         return discord.File(buf, filename='role_stats.png')
     
     async def generate_win_rate_chart(self, guild_id: int) -> Optional[discord.File]:
         """村人陣営vs人狼陣営の勝率を示す円グラフを生成する"""
+        if not self.matplotlib_available:
+            return None
+            
         stats = await self.get_server_stats(guild_id)
         
         if stats["total_games"] < 5:  # 5ゲーム以上ある場合のみグラフを生成
             return None
         
         # matplotlib の設定
-        plt.figure(figsize=(8, 8))
-        plt.style.use('dark_background')
+        self.plt.figure(figsize=(8, 8))
+        self.plt.style.use('dark_background')
         
         # データを準備
         labels = ['村人陣営', '人狼陣営']
@@ -467,18 +482,18 @@ class StatsManager:
         explode = (0.1, 0)  # 村人陣営を少し強調
         
         # グラフを描画
-        plt.pie(sizes, explode=explode, labels=labels, colors=colors,
+        self.plt.pie(sizes, explode=explode, labels=labels, colors=colors,
                autopct='%1.1f%%', shadow=True, startangle=90)
         
         # グラフの装飾
-        plt.title('陣営別勝率', fontsize=16)
-        plt.axis('equal')  # 円が歪まないようにする
+        self.plt.title('陣営別勝率', fontsize=16)
+        self.plt.axis('equal')  # 円が歪まないようにする
         
         # ファイルとして保存
-        buf = io.BytesIO()
-        plt.savefig(buf, format='png')
+        buf = self.io.BytesIO()
+        self.plt.savefig(buf, format='png')
         buf.seek(0)
-        plt.close()
+        self.plt.close()
         
         return discord.File(buf, filename='win_rate.png')
     

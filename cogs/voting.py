@@ -7,6 +7,7 @@ from discord.ext import commands
 from utils.embed_creator import create_base_embed, create_game_status_embed
 from utils.validators import is_guild_channel, MentionConverter
 from utils.config import GameConfig, EmbedColors
+from views.vote_view import VoteView
 
 class VotingCog(commands.Cog):
     """投票処理Cog"""
@@ -89,6 +90,69 @@ class VotingCog(commands.Cog):
             # 投票結果を処理
             await self.process_voting_results(ctx.channel, game)
     
+    @commands.command(name="voteui")
+    async def vote_ui(self, ctx):
+        """ボタンUIを使った投票を開始"""
+        # サーバーチャンネルでのみ実行可能
+        if not is_guild_channel(ctx):
+            await ctx.send("このコマンドはサーバーのチャンネルでのみ使用できます。")
+            return
+        
+        # ゲームマネージャーの取得
+        game_manager = self.bot.get_cog("GameManagementCog")
+        if not game_manager:
+            await ctx.send("ゲーム管理システムが見つかりません。")
+            return
+        
+        # ゲームが進行中かチェック
+        if not game_manager.is_game_active(ctx.guild.id):
+            await ctx.send("現在進行中のゲームがありません。")
+            return
+        
+        game = game_manager.get_game(ctx.guild.id)
+        
+        # 投票フェーズかチェック
+        if game.phase != "voting":
+            await ctx.send("現在は投票フェーズではありません。")
+            return
+        
+        # タイムアウト値を設定
+        timeout = GameConfig.VOTE_TIME
+        
+        # VoteViewを作成
+        view = VoteView(game, ctx, timeout=timeout)
+        
+        # 埋め込みメッセージを作成
+        embed = create_base_embed(
+            title="🗳️ 投票",
+            description=f"処刑する人を決めるための投票です。\n"
+                        f"投票時間: {timeout}秒\n\n"
+                        f"**ボタンをクリックして投票してください**",
+            color=EmbedColors.PRIMARY
+        )
+        
+        # 生存プレイヤーリストを追加
+        alive_players = game.get_alive_players()
+        player_list = "\n".join([f"- {p.name}" for p in alive_players])
+        embed.add_field(name="生存者", value=player_list, inline=False)
+        
+        # 投票状況フィールド（初期状態は空）
+        embed.add_field(name="投票状況", value="まだ投票はありません。", inline=False)
+        
+        # 進行状況
+        embed.add_field(
+            name="進行状況", 
+            value=f"0/{len(alive_players)} 投票完了", 
+            inline=False
+        )
+        
+        # メッセージを送信
+        message = await ctx.send(embed=embed, view=view)
+        
+        # メッセージIDを保存して後で更新できるようにする
+        view.message = message
+        game.vote_message = message
+    
     async def start_voting_phase(self, channel, game):
         """投票フェーズを開始"""
         if not channel:
@@ -107,10 +171,14 @@ class VotingCog(commands.Cog):
         
         # 投票開始メッセージ
         vote_msg = "🗳️ 処刑する人を決める投票を開始します。\n"
-        vote_msg += "`!vote @ユーザー名` コマンドで投票してください。\n"
+        vote_msg += "`!vote @ユーザー名` コマンドで投票するか、下のボタンUIを使用してください。\n"
         vote_msg += f"投票時間は{GameConfig.VOTE_TIME}秒です。"
         
         await channel.send(vote_msg)
+        
+        # ボタンUIを自動表示
+        ctx = await self.bot.get_context(channel.last_message)
+        await self.vote_ui(ctx)
         
         # 制限時間を設定
         async def update_timer(remaining):

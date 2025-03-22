@@ -17,6 +17,9 @@ class Game:
         self.phase = "waiting"  # waiting, night, day, voting, finished
         self.day_count = 0  # 経過日数
         
+        # Discord Bot参照（後で設定）
+        self.bot = None
+        
         # 夜のアクション結果
         self.wolf_target = None  # 人狼の標的
         self.protected_target = None  # 狩人の護衛対象
@@ -26,6 +29,7 @@ class Game:
         # 投票関連
         self.votes = {}  # {voter_id: target_id}
         self.vote_count = {}  # {target_id: count}
+        self.vote_message = None  # 投票用UIメッセージ
         
         # タイマー関連
         self.timer = None

@@ -1,8 +1,6 @@
 """
 ゲームバランスを分析するユーティリティ
 """
-import numpy as np
-import matplotlib.pyplot as plt
 import io
 from collections import defaultdict
 import datetime
@@ -13,6 +11,17 @@ class BalanceAnalyzer:
     
     def __init__(self, stats_manager):
         self.stats_manager = stats_manager
+        
+        # matplotlibとnumpyが利用可能かチェック
+        self.matplotlib_available = False
+        try:
+            import numpy as np
+            import matplotlib.pyplot as plt
+            self.np = np
+            self.plt = plt
+            self.matplotlib_available = True
+        except ImportError:
+            print("matplotlib or numpy is not available. Charts will not be generated.")
         
     def analyze_role_win_rates(self, min_games: int = 10) -> Dict[str, Any]:
         """役職ごとの勝率を分析"""
@@ -97,6 +106,9 @@ class BalanceAnalyzer:
         
     def generate_win_rate_chart(self) -> Optional[io.BytesIO]:
         """役職勝率のグラフを生成"""
+        if not self.matplotlib_available:
+            return None
+            
         # 役職勝率データを取得
         analysis = self.analyze_role_win_rates()
         win_rates = analysis["win_rates"]
@@ -105,7 +117,7 @@ class BalanceAnalyzer:
             return None
             
         # グラフ作成
-        plt.figure(figsize=(10, 6))
+        self.plt.figure(figsize=(10, 6))
         
         roles = list(win_rates.keys())
         rates = list(win_rates.values())
@@ -123,31 +135,34 @@ class BalanceAnalyzer:
                 colors.append("blue")   # その他
                 
         # 横棒グラフ
-        bars = plt.barh(roles, [r * 100 for r in rates], color=colors)
+        bars = self.plt.barh(roles, [r * 100 for r in rates], color=colors)
         
         # 50%ラインを追加
-        plt.axvline(x=50, color='gray', linestyle='--', alpha=0.7)
+        self.plt.axvline(x=50, color='gray', linestyle='--', alpha=0.7)
         
         # 各バーに値を表示
         for bar in bars:
             width = bar.get_width()
-            plt.text(width + 1, bar.get_y() + bar.get_height()/2, f'{width:.1f}%',
+            self.plt.text(width + 1, bar.get_y() + bar.get_height()/2, f'{width:.1f}%',
                     va='center')
         
-        plt.title('役職別勝率')
-        plt.xlabel('勝率 (%)')
-        plt.tight_layout()
+        self.plt.title('役職別勝率')
+        self.plt.xlabel('勝率 (%)')
+        self.plt.tight_layout()
         
         # 画像をバイトストリームに保存
         buffer = io.BytesIO()
-        plt.savefig(buffer, format='png')
+        self.plt.savefig(buffer, format='png')
         buffer.seek(0)
-        plt.close()
+        self.plt.close()
         
         return buffer
         
     def generate_team_win_chart(self) -> Optional[io.BytesIO]:
         """陣営勝率のグラフを生成"""
+        if not self.matplotlib_available:
+            return None
+            
         # 陣営勝率データを取得
         analysis = self.analyze_team_balance()
         win_rates = analysis["win_rates"]
@@ -156,7 +171,7 @@ class BalanceAnalyzer:
             return None
             
         # グラフ作成
-        plt.figure(figsize=(8, 6))
+        self.plt.figure(figsize=(8, 6))
         
         teams = list(win_rates.keys())
         rates = [win_rates[team] * 100 for team in teams]
@@ -174,16 +189,16 @@ class BalanceAnalyzer:
                 colors.append("blue")   # その他
         
         # 円グラフ
-        plt.pie(rates, labels=teams, colors=colors, autopct='%1.1f%%',
+        self.plt.pie(rates, labels=teams, colors=colors, autopct='%1.1f%%',
                 startangle=90, shadow=True)
-        plt.axis('equal')
-        plt.title('陣営別勝率')
+        self.plt.axis('equal')
+        self.plt.title('陣営別勝率')
         
         # 画像をバイトストリームに保存
         buffer = io.BytesIO()
-        plt.savefig(buffer, format='png')
+        self.plt.savefig(buffer, format='png')
         buffer.seek(0)
-        plt.close()
+        self.plt.close()
         
         return buffer
         
