@@ -51,7 +51,8 @@ async def load_extensions():
 
     # 基本的なユーティリティCogを先に読み込む
     utility_cogs = [
-        'utils.role_balancer',   # 役職バランサー
+        'utils.database_manager',  # データベース管理
+        'utils.role_balancer',     # 役職バランサー
     ]
     
     # コア機能のCog
@@ -97,10 +98,17 @@ async def on_ready():
     """Botの準備完了時に呼ばれる"""
     print(f'{bot.user.name} has connected to Discord!')
     print(f'Bot ID: {bot.user.id}')
-    print('------')
     
-    # Cogを読み込む
-    await load_extensions()
+    try:
+        # Cogを読み込む
+        await load_extensions()
+        print("すべてのCogの読み込みに成功しました")
+    except Exception as e:
+        print(f"Cogの読み込み中にエラーが発生しました: {e}")
+        import traceback
+        traceback.print_exc()
+    
+    print('------')
     
     # プレゼンス（状態）を設定
     await bot.change_presence(activity=discord.Game(name=f"{GameConfig.PREFIX}werewolf_help で使い方を表示"))

@@ -133,7 +133,7 @@ class RoleComposerCog(commands.Cog):
             await ctx.send("DatabaseManagerが見つかりません。")
             return
         
-        settings = db_manager.get_server_settings(str(ctx.guild.id))
+        settings = await db_manager.get_server_settings(str(ctx.guild.id))
         roles_config = settings.get("roles_config", {})
         
         # プリセットの構成をコピー
@@ -142,7 +142,7 @@ class RoleComposerCog(commands.Cog):
             roles_config[player_count] = composition
         
         # 設定を保存
-        db_manager.update_server_setting(str(ctx.guild.id), "roles_config", roles_config)
+        await db_manager.update_server_setting(str(ctx.guild.id), "roles_config", roles_config)
         
         # 確認メッセージを送信
         await ctx.send(f"プリセット「{preset['name']}」を適用しました。")
@@ -197,12 +197,12 @@ class RoleComposerCog(commands.Cog):
             await ctx.send("DatabaseManagerが見つかりません。")
             return
         
-        settings = db_manager.get_server_settings(str(ctx.guild.id))
+        settings = await db_manager.get_server_settings(str(ctx.guild.id))
         roles_config = settings.get("roles_config", {})
         
         # 構成を保存
         roles_config[str(player_count)] = composition
-        db_manager.update_server_setting(str(ctx.guild.id), "roles_config", roles_config)
+        await db_manager.update_server_setting(str(ctx.guild.id), "roles_config", roles_config)
         
         # 確認メッセージを送信
         roles_text = "\n".join([f"- {role}: {count}人" for role, count in composition.items()])
@@ -257,12 +257,12 @@ class RoleComposerCog(commands.Cog):
             await ctx.send("DatabaseManagerが見つかりません。")
             return
         
-        settings = db_manager.get_server_settings(str(ctx.guild.id))
+        settings = await db_manager.get_server_settings(str(ctx.guild.id))
         roles_config = settings.get("roles_config", {})
         
         # 構成を保存
         roles_config[str(player_count)] = composition
-        db_manager.update_server_setting(str(ctx.guild.id), "roles_config", roles_config)
+        await db_manager.update_server_setting(str(ctx.guild.id), "roles_config", roles_config)
         
         # 確認メッセージを送信
         roles_text = "\n".join([f"- {role}: {count}人" for role, count in composition.items()])
@@ -276,7 +276,7 @@ class RoleComposerCog(commands.Cog):
             await ctx.send("DatabaseManagerが見つかりません。")
             return
         
-        settings = db_manager.get_server_settings(str(ctx.guild.id))
+        settings = await db_manager.get_server_settings(str(ctx.guild.id))
         roles_config = settings.get("roles_config", {})
         
         if player_count is not None:

@@ -22,7 +22,7 @@ class RulesManagerCog(commands.Cog):
             await ctx.send("DatabaseManagerが見つかりません。")
             return
         
-        settings = db_manager.get_server_settings(str(ctx.guild.id))
+        settings = await db_manager.get_server_settings(str(ctx.guild.id))
         rules = settings.get("game_rules", {})
         
         # 現在の設定を表示
@@ -114,12 +114,12 @@ class RulesManagerCog(commands.Cog):
             await ctx.send("DatabaseManagerが見つかりません。")
             return
         
-        settings = db_manager.get_server_settings(str(ctx.guild.id))
+        settings = await db_manager.get_server_settings(str(ctx.guild.id))
         rules = settings.get("game_rules", {})
         rules[rule_id] = enabled
         
         # 設定を保存
-        db_manager.update_server_setting(str(ctx.guild.id), "game_rules", rules)
+        await db_manager.update_server_setting(str(ctx.guild.id), "game_rules", rules)
         
         # 確認メッセージを送信
         status = "有効" if enabled else "無効"
@@ -132,7 +132,7 @@ class RulesManagerCog(commands.Cog):
         if not db_manager:
             return
         
-        settings = db_manager.get_server_settings(str(guild_id))
+        settings = await db_manager.get_server_settings(str(guild_id))
         rule_settings = settings.get("game_rules", {})
         
         # 特殊ルールオブジェクトを設定

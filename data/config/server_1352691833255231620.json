@@ -1,0 +1,46 @@
+{
+  "roles_config": {
+    "5": {
+      "村人": 3,
+      "人狼": 1,
+      "占い師": 1
+    },
+    "6": {
+      "村人": 4,
+      "人狼": 1,
+      "占い師": 1
+    },
+    "7": {
+      "村人": 4,
+      "人狼": 2,
+      "占い師": 1
+    },
+    "8": {
+      "村人": 5,
+      "人狼": 2,
+      "占い師": 1
+    },
+    "9": {
+      "村人": 6,
+      "人狼": 2,
+      "占い師": 1
+    },
+    "10": {
+      "村人": 6,
+      "人狼": 3,
+      "占い師": 1
+    }
+  },
+  "game_rules": {
+    "no_first_night_kill": false,
+    "lovers_enabled": false,
+    "no_consecutive_guard": true,
+    "random_tied_vote": false,
+    "dead_chat_enabled": true
+  },
+  "timers": {
+    "day": 300,
+    "night": 90,
+    "voting": 60
+  }
+}
