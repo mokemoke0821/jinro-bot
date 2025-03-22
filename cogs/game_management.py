@@ -135,6 +135,10 @@ class GameManagementCog(commands.Cog):
             await ctx.send(f"ゲームを開始できませんでした: {error_msg}")
             return
         
+        # 霊界チャンネルを作成（必要な場合）
+        if game.special_rules.dead_chat_enabled:
+            await self.create_dead_chat_channel(ctx.guild, game)
+        
         # ゲーム開始メッセージを送信
         embed = create_base_embed(
             title="🐺 人狼ゲーム開始",
@@ -258,6 +262,89 @@ class GameManagementCog(commands.Cog):
         # タイマー開始
         await game.start_timer(GameConfig.NIGHT_PHASE_TIME, update_timer, timer_complete)
 
+    async def create_dead_chat_channel(self, guild, game):
+        """霊界チャットチャンネルを作成"""
+        try:
+            # カテゴリーを作成または取得
+            category_name = "人狼ゲーム"
+            category = discord.utils.get(guild.categories, name=category_name)
+            if not category:
+                # カテゴリーが存在しない場合は作成
+                category = await guild.create_category(category_name)
+            
+            # 霊界チャンネル名
+            channel_name = "霊界チャット"
+            
+            # 既存の霊界チャンネルを検索
+            existing_channel = discord.utils.get(guild.text_channels, name=channel_name, category=category)
+            if existing_channel:
+                # 既存のチャンネル権限をリセット
+                await existing_channel.edit(sync_permissions=True)
+                game.dead_chat_channel_id = existing_channel.id
+                return existing_channel
+            
+            # チャンネル作成時の権限設定
+            overwrites = {
+                guild.default_role: discord.PermissionOverwrite(read_messages=False),  # デフォルトでは非表示
+                guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True)  # Botは閲覧可能
+            }
+            
+            # チャンネル作成
+            channel = await guild.create_text_channel(
+                name=channel_name,
+                category=category,
+                overwrites=overwrites,
+                topic="死亡したプレイヤー専用のチャット"
+            )
+            
+            # チャンネルIDをゲームに保存
+            game.dead_chat_channel_id = channel.id
+            
+            # 初期メッセージ
+            embed = create_base_embed(
+                title="👻 霊界チャット",
+                description="ここは死亡したプレイヤー専用のチャットです。自由に会話ができますが、生存者との交流はできません。",
+                color=EmbedColors.WARNING
+            )
+            await channel.send(embed=embed)
+            
+            return channel
+        except Exception as e:
+            print(f"霊界チャンネル作成エラー: {e}")
+            return None
+    
+    async def update_dead_chat_permissions(self, guild, game, dead_player):
+        """死亡したプレイヤーに霊界チャットへのアクセス権を付与"""
+        if not hasattr(game, 'dead_chat_channel_id') or not game.dead_chat_channel_id:
+            return False
+        
+        try:
+            # チャンネルを取得
+            channel = guild.get_channel(game.dead_chat_channel_id)
+            if not channel:
+                return False
+            
+            # メンバーを取得
+            member = guild.get_member(int(dead_player.user_id))
+            if not member:
+                return False
+            
+            # 権限を設定
+            await channel.set_permissions(member, read_messages=True, send_messages=True)
+            
+            # 入室メッセージ
+            embed = create_base_embed(
+                title="👻 新たな亡霊",
+                description=f"{member.mention} が霊界に参加しました。",
+                color=EmbedColors.WARNING
+            )
+            await channel.send(embed=embed)
+            
+            return True
+        except Exception as e:
+            print(f"霊界チャット権限更新エラー: {e}")
+            return False
+            
 async def setup(bot):
     """Cogをbotに追加"""
     await bot.add_cog(GameManagementCog(bot))

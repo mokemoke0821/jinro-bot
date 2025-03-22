@@ -237,6 +237,12 @@ class VotingCog(commands.Cog):
                 inline=False
             )
             
+            # 霊界チャットが有効な場合、処刑されたプレイヤーに権限を付与
+            if hasattr(game, 'dead_chat_channel_id') and game.special_rules.dead_chat_enabled:
+                game_manager = self.bot.get_cog("GameManagementCog")
+                if game_manager:
+                    await game_manager.update_dead_chat_permissions(channel.guild, game, executed_player)
+        
             # 霊能者がいる場合は処刑者の役職を通知
             for player in game.players.values():
                 if player.is_alive and player.role == "霊能者":
@@ -244,12 +250,50 @@ class VotingCog(commands.Cog):
                         member = self.bot.get_guild(int(game.guild_id)).get_member(int(player.user_id))
                         if member:
                             is_werewolf = executed_player.role == "人狼"
+                            # 結果を保存
+                            if not hasattr(player, 'medium_results'):
+                                player.medium_results = {}
+                            player.medium_results[executed_player.user_id] = {
+                                'name': executed_player.name,
+                                'role': executed_player.role,
+                                'is_werewolf': is_werewolf,
+                                'day': game.day_count
+                            }
+                            
+                            # 改善された霊能結果表示
                             medium_embed = create_base_embed(
-                                title="霊能結果",
-                                description=f"処刑された **{executed_player.name}** は " + 
-                                            (f"**人狼**でした！" if is_werewolf else f"**人狼ではありません**。"),
+                                title="🔮 霊能結果",
+                                description=f"Day {game.day_count}の霊能結果",
                                 color=EmbedColors.ERROR if is_werewolf else EmbedColors.SUCCESS
                             )
+                            
+                            # 結果の詳細
+                            result_text = f"処刑された **{executed_player.name}** は"
+                            if is_werewolf:
+                                result_text += f" **人狼**でした！"
+                            else:
+                                result_text += f" **村人陣営**でした。"
+                            
+                            medium_embed.add_field(
+                                name="本日の結果",
+                                value=result_text,
+                                inline=False
+                            )
+                            
+                            # 過去の霊能結果履歴
+                            if len(player.medium_results) > 1:
+                                history = "これまでの霊能結果:\n"
+                                for uid, result in player.medium_results.items():
+                                    if uid != executed_player.user_id:  # 今日の結果を除外
+                                        wolf_status = "**人狼**" if result['is_werewolf'] else "**村人陣営**"
+                                        history += f"Day {result['day']}: {result['name']} - {wolf_status}\n"
+                                
+                                medium_embed.add_field(
+                                    name="履歴",
+                                    value=history,
+                                    inline=False
+                                )
+                            
                             await member.send(embed=medium_embed)
                     except Exception as e:
                         print(f"霊能者への通知に失敗: {e}")

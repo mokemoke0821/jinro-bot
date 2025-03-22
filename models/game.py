@@ -34,6 +34,10 @@ class Game:
         # タイマー関連
         self.timer = None
         self.remaining_time = 0
+        
+        # 特殊ルール
+        from models.special_rules import SpecialRules
+        self.special_rules = SpecialRules()
     
     def add_player(self, user_id, name):
         """プレイヤーを追加"""
@@ -100,16 +104,31 @@ class Game:
         # 人狼の襲撃処理
         if self.wolf_target:
             target_id = self.wolf_target
+            target_player = self.players.get(str(target_id))
             
             # 護衛対象かチェック
             if self.protected_target == target_id:
                 # 護衛成功
                 pass
+            # 妖狐の襲撃耐性チェック
+            elif target_player and target_player.is_fox():
+                # 妖狐は人狼の襲撃では死なない
+                pass
             else:
                 # 襲撃成功
-                if str(target_id) in self.players:
-                    self.players[str(target_id)].kill()
+                if target_player:
+                    target_player.kill()
                     self.last_killed = str(target_id)
+                    
+                    # プレイヤーが死亡した場合、霊界チャットの権限を更新
+                    if hasattr(self, 'dead_chat_channel_id') and self.special_rules.dead_chat_enabled:
+                        guild = self.bot.get_guild(int(self.guild_id))
+                        if guild:
+                            game_manager = self.bot.get_cog("GameManagementCog")
+                            if game_manager:
+                                # 非同期でパーミッション更新
+                                import asyncio
+                                asyncio.create_task(game_manager.update_dead_chat_permissions(guild, self, target_player))
                 
         # 状態リセット
         self.wolf_target = None

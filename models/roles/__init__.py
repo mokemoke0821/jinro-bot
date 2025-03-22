@@ -28,6 +28,23 @@ ROLE_MAP = {
     "狂信者": Fanatic
 }
 
+def create_role_instance(role_name, player):
+    """
+    役職名からクラスのインスタンスを生成する
+    
+    Args:
+        role_name (str): 役職名
+        player (Player): プレイヤーインスタンス
+        
+    Returns:
+        BaseRole: 役職クラスのインスタンス（継承クラス）
+        None: 存在しない役職名の場合
+    """
+    role_class = ROLE_MAP.get(role_name)
+    if role_class:
+        return role_class(player)
+    return None
+
 __all__ = [
     'BaseRole',
     'Villager',
@@ -42,5 +59,6 @@ __all__ = [
     'Cat',
     'Prophet',
     'Fanatic',
-    'ROLE_MAP'
+    'ROLE_MAP',
+    'create_role_instance'
 ]

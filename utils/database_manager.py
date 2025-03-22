@@ -32,20 +32,32 @@ class DatabaseManager(commands.Cog):
         guild_id = str(guild_id)  # IDを文字列に変換
         settings_path = f"{self.config_dir}/server_{guild_id}.json"
         
+        # デバッグ用ログを追加
+        print(f"Loading settings for guild {guild_id} from {settings_path}")
+        
         if os.path.exists(settings_path):
             try:
                 async with self.settings_lock:
                     with open(settings_path, "r", encoding="utf-8") as f:
-                        return json.load(f)
+                        result = json.load(f)
+                        # デバッグログを追加
+                        print(f"Loaded settings: {type(result)}")
+                        return result
             except json.JSONDecodeError:
                 # ファイルが破損している場合、デフォルト設定を返す
-                return self._get_default_settings()
+                default = self._get_default_settings()
+                print(f"JSON decode error, returning default: {type(default)}")
+                return default
             except Exception as e:
                 print(f"設定読み込みエラー: {e}")
-                return self._get_default_settings()
+                default = self._get_default_settings() 
+                print(f"Error occurred, returning default: {type(default)}")
+                return default
         else:
             # 設定ファイルが存在しない場合、デフォルト設定を返す
-            return self._get_default_settings()
+            default = self._get_default_settings()
+            print(f"Settings file not found, returning default: {type(default)}")
+            return default
     
     async def update_server_setting(self, guild_id, key, value):
         """サーバーの特定の設定を更新"""
@@ -53,13 +65,21 @@ class DatabaseManager(commands.Cog):
         settings_path = f"{self.config_dir}/server_{guild_id}.json"
         
         try:
+            print(f"Updating setting for guild {guild_id}, key: {key}")
             # 現在の設定を取得
             settings = await self.get_server_settings(guild_id)
+            print(f"Current settings type: {type(settings)}")
+            
+            # 例外ケースをチェック
+            if asyncio.iscoroutine(settings):
+                print("Warning: settings is still a coroutine in update_server_setting, awaiting again")
+                settings = await settings
             
             # 設定を更新
             settings[key] = value
             
             # 設定を保存
+            print(f"Saving updated settings to {settings_path}")
             async with self.settings_lock:
                 with open(settings_path, "w", encoding="utf-8") as f:
                     json.dump(settings, f, ensure_ascii=False, indent=2)
@@ -67,6 +87,8 @@ class DatabaseManager(commands.Cog):
             return True
         except Exception as e:
             print(f"設定更新エラー: {e}")
+            import traceback
+            traceback.print_exc()
             return False
     
     async def get_player_stats(self, player_id):
