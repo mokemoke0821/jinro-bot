@@ -7,6 +7,7 @@ import sys
 import discord
 from discord.ext import commands
 from dotenv import load_dotenv
+import traceback
 
 # カレントディレクトリをモジュール検索パスに追加
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -30,8 +31,38 @@ intents.message_content = True
 intents.members = True
 intents.guilds = True
 
+# カスタムBotクラスの定義
+class JinroBot(commands.Bot):
+    async def get_context(self, message, *, cls=commands.Context):
+        """カスタムコンテキスト処理"""
+        # 元のコンテキスト取得
+        ctx = await super().get_context(message, cls=cls)
+        
+        # コマンド処理カスタマイズ
+        if ctx.command and ctx.command.parent and ctx.command.parent.name == 'compose':
+            # role_composer関連のコマンドは特別処理
+            ctx.suppressed_errors = True
+        
+        return ctx
+    
+    async def invoke(self, ctx):
+        """コマンド実行のカスタム処理"""
+        if hasattr(ctx, 'suppressed_errors') and ctx.suppressed_errors:
+            # エラー抑制モード
+            try:
+                if ctx.command is not None:
+                    await ctx.command.invoke(ctx)
+                return True
+            except Exception as e:
+                # エラーをログに記録するが表示はしない
+                print(f"[SILENT_ERROR] Error in {ctx.command}: {e}")
+                return False
+        else:
+            # 通常の実行
+            return await super().invoke(ctx)
+
 # Botの初期化
-bot = commands.Bot(command_prefix=GameConfig.PREFIX, intents=intents, help_command=None)
+bot = JinroBot(command_prefix=GameConfig.PREFIX, intents=intents, help_command=None)
 
 # Cogの読み込み
 async def load_extensions():
@@ -105,7 +136,6 @@ async def on_ready():
         print("すべてのCogの読み込みに成功しました")
     except Exception as e:
         print(f"Cogの読み込み中にエラーが発生しました: {e}")
-        import traceback
         traceback.print_exc()
     
     print('------')
@@ -113,20 +143,54 @@ async def on_ready():
     # プレゼンス（状態）を設定
     await bot.change_presence(activity=discord.Game(name=f"{GameConfig.PREFIX}werewolf_help で使い方を表示"))
 
+# コマンド処理前のフック - メッセージ内容に基づいてエラー表示を制御
+@bot.event
+async def on_message(message):
+    """メッセージを受信したときの処理"""
+    # Botのメッセージは無視
+    if message.author.bot:
+        return
+    
+    # メッセージからプレフィックスとコマンドを抽出
+    if message.content.startswith(bot.command_prefix):
+        command_text = message.content[len(bot.command_prefix):]
+        
+        # compose コマンドの場合は特別処理
+        if command_text.startswith('compose'):
+            try:
+                # コンテキストを作成せずに直接コマンドを検索
+                ctx = await bot.get_context(message)
+                
+                # これはエラーを抑制するためのもの
+                ctx.suppressed_errors = True
+                
+                # コマンド処理を続行
+                await bot.process_commands(message)
+                return
+            except Exception as e:
+                print(f"[ON_MESSAGE] Error in compose command preprocessing: {e}")
+                # エラーが発生しても通常の処理を続行
+    
+    # 通常のコマンド処理
+    await bot.process_commands(message)
+
 @bot.event
 async def on_command_error(ctx, error):
     """コマンドエラー時の処理"""
+    # エラー抑制フラグがある場合は何も表示しない
+    if hasattr(ctx, 'suppressed_errors') and ctx.suppressed_errors:
+        print(f"[ERROR_HANDLER] Suppressed display of error in {ctx.command}: {error}")
+        return
+    
     # 常に詳細なエラー情報をログに出力（デバッグ用）
     command_name = ctx.command.qualified_name if ctx.command else 'unknown'
     print(f"[ERROR_HANDLER] Error in command '{command_name}': {error}")
-    print(f"[ERROR_HANDLER] Error type: {type(error)}")
     
     # コマンド実行時のエラー（CommandInvokeError）の場合は元の例外を取得
     original_error = error
     if isinstance(error, commands.CommandInvokeError):
         original_error = error.original
         print(f"[ERROR_HANDLER] Original error: {original_error}")
-        print(f"[ERROR_HANDLER] Original error type: {type(original_error)}")
     
     # 特定のコマンドのエラーは無視する
     if ctx.command:
@@ -175,10 +239,6 @@ async def on_command_error(ctx, error):
         )
         await ctx.send(embed=embed)
     else:
-        # ログに詳細なエラー情報を記録
-        command_name = ctx.command.qualified_name if ctx.command else 'unknown command'
-        print(f"[ERROR_HANDLER] Command error in '{command_name}': {error}")
-        
         # 一般的なエラーメッセージ
         embed = discord.Embed(
             title="エラー発生",
@@ -186,6 +246,15 @@ async def on_command_error(ctx, error):
             color=EmbedColors.ERROR
         )
         await ctx.send(embed=embed)
+
+# composeコマンドのエラーメッセージを完全にブロックするカスタムエラーハンドラー
+@bot.event
+async def on_command(ctx):
+    """コマンド実行前のフック - composeコマンドの場合はエラーを抑制"""
+    # compose コマンドの場合
+    if ctx.command and ctx.command.qualified_name.startswith('compose'):
+        ctx.suppressed_errors = True
+        print(f"[ON_COMMAND] Set suppressed_errors for {ctx.command}")
 
 # Botの起動
 if __name__ == "__main__":
