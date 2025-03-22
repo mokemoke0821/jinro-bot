@@ -2,17 +2,27 @@
 Discord人狼Bot メインエントリーポイント
 """
 import os
-import asyncio
 import sys
-import discord
-from discord.ext import commands
-from dotenv import load_dotenv
 import traceback
 
 # カレントディレクトリをモジュール検索パスに追加
 current_dir = os.path.dirname(os.path.abspath(__file__))
 if current_dir not in sys.path:
     sys.path.append(current_dir)
+
+# *** 重要 ***
+# Discord.pyのモジュールをロードする前にエラーハンドリングパッチを適用
+try:
+    import discord_error_patch
+    print("Discord error patch loaded")
+except ImportError:
+    print("WARNING: Could not load discord_error_patch module")
+
+# その他のモジュールをインポート
+import asyncio
+import discord
+from discord.ext import commands
+from dotenv import load_dotenv
 
 from utils.config import GameConfig, EmbedColors
 
@@ -273,24 +283,7 @@ async def on_command(ctx):
         ctx.suppressed_errors = True
         print(f"[ON_COMMAND] Set suppressed_errors for {ctx.command}")
 
-# メッセージが送信される直前の処理をフック - エラーメッセージをブロック
-# これはDiscordの内部実装に依存した方法だが、最終手段として使用
-original_send = discord.abc.Messageable.send
-
-async def custom_send(self, content=None, **kwargs):
-    """メッセージ送信のカスタム処理"""
-    # エラーメッセージをブロック
-    if content and isinstance(content, str) and "エラーが発生しました" in content:
-        if "coroutine" in content and "no attribute" in content:
-            # コルーチン関連のエラーメッセージをブロック
-            print(f"[BLOCKED ERROR MESSAGE] {content}")
-            return None  # メッセージを送信しない
-    
-    # 通常通りメッセージを送信
-    return await original_send(self, content, **kwargs)
-
-# 元のメソッドを保存
-discord.abc.Messageable.send = custom_send
+# パッチモジュールで実装済みのため、ここでの実装は不要になったので削除
 
 # Botの起動
 if __name__ == "__main__":
