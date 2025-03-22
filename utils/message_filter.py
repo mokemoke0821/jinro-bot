@@ -51,11 +51,11 @@ def is_error_message(data):
     
     return False
 
-async def filtered_request(original_func, self, route, **kwargs):
-    """
-    HTTP リクエストをフィルタリングする関数
-    特にメッセージ送信リクエストを対象に、エラーメッセージを検出して遮断
-    """
+async def filtered_http_request(original_func, *args, **kwargs):
+    """HTTP リクエストをフィルタリングする関数"""
+    self = args[0]  # HTTPClient インスタンス
+    route = args[1]  # Route オブジェクト
+    
     # Create Message エンドポイントに対する処理を特別扱い
     if route.method == "POST" and "channels/" in route.url and "/messages" in route.url:
         # メッセージデータを取得
@@ -89,7 +89,7 @@ async def filtered_request(original_func, self, route, **kwargs):
             )
     
     # 通常のリクエスト処理を継続
-    return await original_func(self, route, **kwargs)
+    return await original_func(*args, **kwargs)
 
 def apply_message_filter():
     """メッセージフィルタリングを適用"""
@@ -100,13 +100,30 @@ def apply_message_filter():
         return True
     
     try:
-        # discord.http.HTTPClientのrequestメソッドをモンキーパッチ
-        ORIGINAL_HTTP_REQUEST = discord.http.HTTPClient.request
+        # Discordのメッセージ送信をフィルタリング
+        original_send = discord.abc.Messageable.send
         
-        # フィルタリングを適用
-        discord.http.HTTPClient.request = functools.partial(
-            filtered_request, ORIGINAL_HTTP_REQUEST
-        )
+        async def filtered_send(self, content=None, **kwargs):
+            # エラーメッセージをフィルタリング
+            if content and isinstance(content, str):
+                for pattern in COMPILED_PATTERNS:
+                    if pattern.search(content):
+                        print(f"[MESSAGE_FILTER] Blocked error message: {content}")
+                        return None  # 何も送信しない
+            
+            # Embedをフィルタリング
+            if 'embed' in kwargs and kwargs['embed']:
+                embed = kwargs['embed']
+                if hasattr(embed, 'title') and embed.title:
+                    if "エラー" in embed.title:
+                        print(f"[MESSAGE_FILTER] Blocked error embed: {embed.title}")
+                        return None
+            
+            # 通常のメッセージは送信
+            return await original_send(self, content, **kwargs)
+        
+        # モンキーパッチを適用
+        discord.abc.Messageable.send = filtered_send
         
         print("[MESSAGE_FILTER] Successfully applied message filtering")
         _hooks_applied = True

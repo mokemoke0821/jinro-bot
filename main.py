@@ -20,12 +20,10 @@ except ImportError:
 
 # さらに強力なメッセージフィルタリングを適用
 try:
-    import discord
-    from utils.message_filter import apply_message_filter
-    filter_result = apply_message_filter()
-    print(f"Message filter applied: {filter_result}")
+    # メッセージフィルタを適用（後でdiscordモジュールをインポートした後に実行）
+    print(f"Message filter will be applied later")
 except Exception as e:
-    print(f"WARNING: Could not apply message filter: {e}")
+    print(f"WARNING: Could not set up message filter: {e}")
 
 # 最強のパッチを適用
 try:
@@ -47,6 +45,14 @@ from utils.config import GameConfig, EmbedColors
 # 環境変数の読み込み
 load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
+
+# Discord.pyモジュールが読み込まれた後でメッセージフィルタを適用
+try:
+    from utils.message_filter import apply_message_filter
+    filter_result = apply_message_filter()
+    print(f"Message filter applied: {filter_result}")
+except Exception as e:
+    print(f"WARNING: Could not apply message filter: {e}")
 
 # データディレクトリが存在することを確認
 for directory in [GameConfig.DATA_DIR, GameConfig.CONFIG_DIR, GameConfig.STATS_DIR, GameConfig.LOG_DIR]:
