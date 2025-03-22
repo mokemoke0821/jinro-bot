@@ -101,9 +101,10 @@ class JinroBot(commands.Bot):
         ctx = await super().get_context(message, cls=cls)
         
         # コマンド処理カスタマイズ
-        if ctx.command and ctx.command.parent and ctx.command.parent.name == 'compose':
-            # role_composer関連のコマンドは特別処理
-            ctx.suppressed_errors = True
+        if ctx.command:
+            if (ctx.command.name == 'compose') or (ctx.command.parent and ctx.command.parent.name == 'compose'):
+                # role_composer関連のコマンドは特別処理
+                ctx.suppressed_errors = True
         
         return ctx
     
@@ -111,12 +112,12 @@ class JinroBot(commands.Bot):
         """コマンド実行のカスタム処理"""
         # composeコマンドのプロアクティブ検出
         if ctx.command and (
-            (ctx.command.qualified_name.startswith('compose')) or 
+            (ctx.command.name == 'compose') or 
             (hasattr(ctx.command, 'parent') and ctx.command.parent and ctx.command.parent.name == 'compose')
         ):
             # composeコマンドは常にエラー抑制モード
             ctx.suppressed_errors = True
-            print(f"[INVOKE] Detected compose command: {ctx.command.qualified_name}")
+            print(f"[INVOKE] Detected compose command: {ctx.command.name}")
             
         if hasattr(ctx, 'suppressed_errors') and ctx.suppressed_errors:
             # エラー抑制モード
@@ -155,7 +156,7 @@ async def on_command_error(ctx, error):
     if any([
         # composeコマンドのエラーは一切表示しない
         ctx.command and (
-            ctx.command.qualified_name.startswith('compose') or 
+            ctx.command.name == 'compose' or 
             (hasattr(ctx.command, 'parent') and ctx.command.parent and ctx.command.parent.name == 'compose')
         ),
         # coroutine関連のエラーを完全に抑制
@@ -166,12 +167,18 @@ async def on_command_error(ctx, error):
     ]):
         print(f"[ERROR HANDLER] Suppressed error: {error}")
         # エラーを表示せずにヘルプメッセージだけ表示する
-        if ctx.command and ctx.command.qualified_name.startswith('compose'):
+        if ctx.command and ctx.command.name == 'compose':
             try:
-                # 代わりに役職構成管理のヘルプを表示
-                compose_cog = bot.get_cog("RoleComposerCog")
-                if compose_cog:
-                    await ctx.invoke(compose_cog.compose)
+                # 代わりに役職構成管理のヘルプを直接表示
+                from direct_compose import setup_commands
+                # composeコマンドオブジェクトを取得
+                compose_command = bot.get_command("compose")
+                if compose_command:
+                    # 引数なしで実行して自動的にヘルプを表示する
+                    await ctx.invoke(compose_command)
+                else:
+                    # コマンドが見つからない場合はシンプルなメッセージを表示
+                    await ctx.send("役職構成管理コマンドを使用するには: `!compose help`")
             except Exception as e:
                 print(f"[ERROR HANDLER] Error showing help: {e}")
         return
@@ -246,7 +253,7 @@ async def load_extensions():
     # 追加機能のCog
     additional_cogs = [
         'cogs.rules_manager',    # ルール管理
-        'cogs.role_composer',    # 役職構成管理
+        # 'cogs.role_composer',  # 役職構成管理 - 直接コマンドに置き換えたため無効化
         'cogs.community',        # コミュニティ提案システム
         'cogs.balance',          # ゲームバランス調整システム
         'cogs.documentation'     # ドキュメント管理
@@ -275,9 +282,24 @@ async def on_ready():
         
         # 直接コマンド登録 - プラグインから独立した修正対応
         try:
-            from direct_compose import setup_commands
-            setup_commands(bot)
-            print("直接コマンド設定が完了しました")
+            # コマンド登録済みかどうかを確認するフラグ
+            if not getattr(bot, "_direct_compose_setup_done", False):
+                # 直接コマンドをインポートして設定
+                import sys
+                from importlib import reload
+                
+                # モジュールを再読み込みする
+                if "direct_compose" in sys.modules:
+                    reload(sys.modules["direct_compose"])
+                
+                from direct_compose import setup_commands
+                setup_commands(bot)
+                
+                # 登録完了フラグを設定
+                bot._direct_compose_setup_done = True
+                print("直接コマンド設定が完了しました")
+            else:
+                print("直接コマンドは既に設定されています")
         except Exception as cmd_error:
             print(f"直接コマンド設定でエラーが発生しました: {cmd_error}")
             traceback.print_exc()
@@ -290,6 +312,9 @@ async def on_ready():
     # プレゼンス（状態）を設定
     await bot.change_presence(activity=discord.Game(name=f"{GameConfig.PREFIX}werewolf_help で使い方を表示"))
 
+# コマンド実行追跡用
+processed_messages = set()
+
 # コマンド処理前のフック - メッセージ内容に基づいてエラー表示を制御
 @bot.event
 async def on_message(message):
@@ -298,28 +323,54 @@ async def on_message(message):
     if message.author.bot:
         return
     
+    # 重複処理チェック - 同じメッセージが複数回処理されないようにする
+    message_id = message.id
+    if message_id in processed_messages:
+        print(f"[DUPLICATE] Message {message_id} already processed, skipping")
+        return
+    
+    # このメッセージを処理済みとしてマーク
+    processed_messages.add(message_id)
+    
+    # 古いメッセージIDをクリーンアップ（最大1000件を保持）
+    if len(processed_messages) > 1000:
+        processed_messages.clear()
+        print("[CLEANUP] Cleared processed messages cache")
+    
     # メッセージからプレフィックスとコマンドを抽出
     if message.content.startswith(bot.command_prefix):
         command_text = message.content[len(bot.command_prefix):]
+        print(f"[COMMAND] Received: {command_text} from {message.author.id} in {message.guild.id if message.guild else 'DM'}")
         
-        # compose コマンドの場合は特別処理
+        # composeコマンドの場合は特別処理
         if command_text.startswith('compose'):
             try:
-                # コンテキストを作成せずに直接コマンドを検索
+                # コンテキストを取得し、エラー抑制フラグを設定
                 ctx = await bot.get_context(message)
-                
-                # これはエラーを抑制するためのもの
                 ctx.suppressed_errors = True
                 
-                # コマンド処理を続行
-                await bot.process_commands(message)
-                return
+                # コマンド引数を解析（スペースで分割）
+                parts = command_text.split()
+                # サブコマンドがある場合
+                if len(parts) > 1:
+                    subcommand = parts[1].lower()
+                    print(f"[COMPOSE] サブコマンド: {subcommand}")
+                
+                # ログに記録
+                log_user_id = message.author.id
+                log_guild_id = message.guild.id if message.guild else "DM"
+                print(f"[COMPOSE] User {log_user_id} in {log_guild_id} executed: {command_text}")
+                
             except Exception as e:
-                print(f"[ON_MESSAGE] Error in compose command preprocessing: {e}")
-                # エラーが発生しても通常の処理を続行
+                print(f"[COMPOSE_ERROR] コマンド解析中にエラー: {e}")
+                traceback.print_exc()
     
     # 通常のコマンド処理
-    await bot.process_commands(message)
+    try:
+        await bot.process_commands(message)
+    except Exception as e:
+        print(f"[PROCESS_ERROR] コマンド処理中にエラー: {e}")
+        traceback.print_exc()
 
 @bot.event
 async def on_command_error(ctx, error):
@@ -350,15 +401,21 @@ async def on_command_error(ctx, error):
         print(f"[ERROR_HANDLER] Suppressed display of error in {command_id}: {error}")
         return
     
-    # 通常のエラー処理ではヘルプメッセージを表示（compose関連のコマンドの場合）
-    if ctx.command and ctx.command.qualified_name.startswith('compose'):
+    # composeコマンドのエラー処理は特別に行う
+    if ctx.command and (ctx.command.name == 'compose' or (hasattr(ctx.command, 'parent') and ctx.command.parent and ctx.command.parent.name == 'compose')):
         try:
-            # RoleComposerCogのヘルプを表示
-            compose_cog = bot.get_cog("RoleComposerCog")
-            if compose_cog and hasattr(compose_cog, 'compose'):
-                await compose_cog.compose(ctx)
+            # composeコマンドオブジェクトを取得
+            compose_command = bot.get_command("compose")
+            if compose_command:
+                # 引数なしで実行して自動的にヘルプを表示する
+                await ctx.invoke(compose_command)
+            else:
+                # コマンドが見つからない場合はシンプルなメッセージを表示
+                await ctx.send("役職構成管理コマンドを使用するには: `!compose help`")
         except Exception as help_e:
             print(f"[ERROR_HANDLER] Error showing help: {help_e}")
+            # エラーが発生した場合はシンプルなメッセージを表示
+            await ctx.send("役職構成管理コマンドのヘルプ表示中にエラーが発生しました。`!compose help`を使用してください。")
         return
     
     # 以下は通常のエラー処理
