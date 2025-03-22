@@ -323,23 +323,42 @@ async def on_message(message):
     if message.author.bot:
         return
     
+    # メッセージIDとチャネルIDを組み合わせたユニークなキー
+    message_key = f"{message.channel.id}_{message.id}"
+    
     # 重複処理チェック - 同じメッセージが複数回処理されないようにする
-    message_id = message.id
-    if message_id in processed_messages:
-        print(f"[DUPLICATE] Message {message_id} already processed, skipping")
+    if message_key in processed_messages:
+        print(f"[DUPLICATE] Message {message_key} already processed, skipping")
         return
     
     # このメッセージを処理済みとしてマーク
-    processed_messages.add(message_id)
+    processed_messages.add(message_key)
     
     # 古いメッセージIDをクリーンアップ（最大1000件を保持）
     if len(processed_messages) > 1000:
         processed_messages.clear()
         print("[CLEANUP] Cleared processed messages cache")
     
-    # メッセージからプレフィックスとコマンドを抽出
+    # チャンネルごとの連続コマンド実行防止（特にcomposeコマンド用）
     if message.content.startswith(bot.command_prefix):
         command_text = message.content[len(bot.command_prefix):]
+        channel_id = message.channel.id
+        channel_lock_key = f"{channel_id}_last_command"
+        
+        # 同じチャンネルでの最後のコマンド実行時刻
+        current_time = asyncio.get_event_loop().time()
+        last_execution = getattr(bot, '_channel_command_locks', {}).get(channel_lock_key, 0)
+        
+        # composeコマンドの場合はチャンネルロックを確認
+        if command_text.startswith('compose') and current_time - last_execution < 3.0:  # 3秒間のクールダウン
+            print(f"[THROTTLE] Command in channel {channel_id} throttled (last execution: {current_time - last_execution:.2f}s ago)")
+            return
+        
+        # チャンネルロックを更新
+        if not hasattr(bot, '_channel_command_locks'):
+            bot._channel_command_locks = {}
+        bot._channel_command_locks[channel_lock_key] = current_time
+        
         print(f"[COMMAND] Received: {command_text} from {message.author.id} in {message.guild.id if message.guild else 'DM'}")
         
         # composeコマンドの場合は特別処理

@@ -125,8 +125,9 @@ ROLE_GROUPS = {
 # 登録済みコマンド追跡用のグローバル変数
 _registered_commands = set()
 
-# コマンド呼び出し履歴（重複チェック用）
+# グローバル変数でコマンド呼び出し履歴とロックを管理
 _command_history = {}
+_command_locks = {}
 
 # 設定の読み込み/保存関数
 async def load_config(guild_id):
@@ -195,35 +196,55 @@ def check_balance(roles):
     
     return True, "バランスOK"
 
-# コマンド実行を追跡するデコレータ
+# コマンド実行を追跡するデコレータ - 改善版
 def track_command_execution(command_name):
     """コマンドの実行を追跡して重複実行を防止するデコレータ"""
     def decorator(func):
         async def wrapper(ctx, *args, **kwargs):
-            global _command_history
+            global _command_history, _command_locks
             
-            # メッセージIDと時間の組み合わせでユニークなキーを生成
+            # メッセージIDとチャネルIDの組み合わせでユニークなキーを生成
             message_id = ctx.message.id
-            key = f"{message_id}_{command_name}"
+            channel_id = ctx.channel.id
+            key = f"{channel_id}_{message_id}_{command_name}"
             
             # すでに実行済みかチェック
             if key in _command_history:
                 logger.debug(f"重複実行を無視: {command_name} (メッセージID: {message_id})")
                 return
             
+            # 同じチャネルでの連続実行をロック
+            channel_key = f"{channel_id}_{command_name}"
+            if channel_key in _command_locks:
+                logger.debug(f"連続実行をブロック: {command_name} (チャネル: {channel_id})")
+                return
+            
+            # ロックを設定
+            _command_locks[channel_key] = True
+            
             # 履歴に追加
             _command_history[key] = True
             
-            # 5分後に履歴から削除
-            async def clear_history():
-                await asyncio.sleep(300)  # 5分待機
-                if key in _command_history:
-                    del _command_history[key]
-            
-            asyncio.create_task(clear_history())
-            
-            # 実際のコマンド実行
-            return await func(ctx, *args, **kwargs)
+            try:
+                # 実際のコマンド実行
+                result = await func(ctx, *args, **kwargs)
+                return result
+            finally:
+                # 5秒後にロックを解除
+                async def clear_lock():
+                    await asyncio.sleep(5)  # 5秒待機
+                    if channel_key in _command_locks:
+                        del _command_locks[channel_key]
+                
+                # 5分後に履歴から削除
+                async def clear_history():
+                    await asyncio.sleep(300)  # 5分待機
+                    if key in _command_history:
+                        del _command_history[key]
+                
+                # 非同期タスクを作成
+                asyncio.create_task(clear_lock())
+                asyncio.create_task(clear_history())
         return wrapper
     return decorator
 
@@ -259,123 +280,181 @@ def setup_commands(bot):
     # =========== メインコマンド関連の再設計 ===========
     # サブコマンドの文字列処理を含むメインコマンド
     @bot.command(name="compose")
-    @track_command_execution("compose")
+    @track_command_execution("compose_main")
     async def compose_command(ctx, *args):
         """役職構成管理のメインコマンド - サブコマンドを処理"""
+        # チャンネルごとの処理状態を追跡
+        channel_id = ctx.channel.id
+        message_id = ctx.message.id
+        processing_key = f"processing_{channel_id}_{message_id}"
+        
+        if hasattr(bot, processing_key):
+            logger.warning(f"すでに処理中のコマンドがあります: {ctx.message.id}")
+            return
+        
+        # 処理中フラグを設定
+        setattr(bot, processing_key, True)
         logger.info(f"compose メインコマンド実行: {ctx.message.id}, 引数: {args}")
         
-        # 引数がない場合はヘルプを表示
-        if not args:
-            return await show_help(ctx)
-        
-        # 最初の引数をサブコマンドとして解釈
-        subcommand = args[0].lower()
-        subcommand_args = args[1:]
-        
-        if subcommand == "help":
-            await show_help(ctx)
-        elif subcommand == "presets":
-            await show_presets(ctx)
-        elif subcommand == "apply":
-            if len(subcommand_args) < 1:
-                await ctx.send("使用方法: `!compose apply [プリセット名]`")
-                return
-            await apply_preset(ctx, subcommand_args[0])
-        elif subcommand == "custom":
-            await custom_composition(ctx, False, *subcommand_args)
-        elif subcommand == "force":
-            await custom_composition(ctx, True, *subcommand_args)
-        elif subcommand == "recommend":
-            if len(subcommand_args) < 1:
-                await ctx.send("使用方法: `!compose recommend [人数]`")
-                return
-            await recommend_composition(ctx, subcommand_args[0])
-        elif subcommand == "show":
-            player_count = subcommand_args[0] if subcommand_args else None
-            await show_composition(ctx, player_count)
-        else:
-            # 未知のサブコマンドの場合はヘルプを表示
-            await ctx.send(f"未知のサブコマンド: `{subcommand}`")
-            await show_help(ctx)
+        try:
+            # 引数がない場合はヘルプを表示
+            if not args:
+                return await show_help(ctx)
+            
+            # 最初の引数をサブコマンドとして解釈
+            subcommand = args[0].lower()
+            subcommand_args = args[1:]
+            
+            if subcommand == "help":
+                await show_help(ctx)
+            elif subcommand == "presets":
+                await show_presets(ctx)
+            elif subcommand == "apply":
+                if len(subcommand_args) < 1:
+                    await ctx.send("使用方法: `!compose apply [プリセット名]`")
+                    return
+                await apply_preset(ctx, subcommand_args[0])
+            elif subcommand == "custom":
+                await custom_composition(ctx, False, *subcommand_args)
+            elif subcommand == "force":
+                await custom_composition(ctx, True, *subcommand_args)
+            elif subcommand == "recommend":
+                if len(subcommand_args) < 1:
+                    await ctx.send("使用方法: `!compose recommend [人数]`")
+                    return
+                await recommend_composition(ctx, subcommand_args[0])
+            elif subcommand == "show":
+                player_count = subcommand_args[0] if subcommand_args else None
+                await show_composition(ctx, player_count)
+            else:
+                # 未知のサブコマンドの場合はヘルプを表示
+                await ctx.send(f"未知のサブコマンド: `{subcommand}`")
+                await show_help(ctx)
+        finally:
+            # 処理中フラグを解除
+            if hasattr(bot, processing_key):
+                delattr(bot, processing_key)
 
     # =========== サブコマンド実装（独立関数として）===========
-    # ヘルプ表示関数
+    # ヘルプ表示関数（重複防止を強化）
     async def show_help(ctx):
         """役職構成管理のヘルプを表示"""
-        logger.info(f"compose help 実行: {ctx.message.id}")
+        # 重複実行を防止するためのロック
+        channel_id = ctx.channel.id
+        lock_key = f"help_lock_{channel_id}"
         
-        # 利用可能なプリセットを表示
-        preset_list = ", ".join(PRESETS.keys())
+        if hasattr(bot, lock_key):
+            logger.debug(f"ヘルプ表示ロック中: {ctx.channel.id}")
+            return
         
-        embed = discord.Embed(
-            title="役職構成管理",
-            description="以下のコマンドで役職構成を管理できます。",
-            color=discord.Color.blue()
-        )
+        # ロックを設定
+        setattr(bot, lock_key, True)
         
-        embed.add_field(
-            name="プリセット一覧",
-            value="`!compose presets` - 利用可能なプリセット一覧を表示",
-            inline=False
-        )
-        
-        embed.add_field(
-            name="プリセット適用",
-            value="`!compose apply [プリセット名]` - プリセット構成を適用",
-            inline=False
-        )
-        
-        embed.add_field(
-            name="カスタム構成",
-            value="`!compose custom [人数] [役職1] [数1] [役職2] [数2] ...` - カスタム役職構成を設定",
-            inline=False
-        )
-        
-        embed.add_field(
-            name="強制カスタム構成",
-            value="`!compose force [人数] [役職1] [数1] [役職2] [数2] ...` - バランスチェックを無視してカスタム構成を設定",
-            inline=False
-        )
-        
-        embed.add_field(
-            name="構成提案",
-            value="`!compose recommend [人数]` - 指定した人数に適した役職構成を提案",
-            inline=False
-        )
-        
-        embed.add_field(
-            name="現在の構成確認",
-            value="`!compose show [人数]` - 指定人数の現在の役職構成を表示",
-            inline=False
-        )
-        
-        await ctx.send(embed=embed)
-        logger.info(f"compose help メッセージ送信成功: {ctx.channel.id}")
-
-    # プリセット一覧表示関数
-    async def show_presets(ctx):
-        """利用可能なプリセット一覧を表示"""
-        logger.info(f"compose presets 実行: {ctx.message.id}")
-        
-        embed = discord.Embed(
-            title="役職構成プリセット一覧",
-            description="以下のプリセットから選択できます。`!compose apply [プリセット名]`で適用できます。",
-            color=discord.Color.green()
-        )
-        
-        for preset_id, preset_data in PRESETS.items():
-            # 各プリセットの情報を追加
-            player_counts = list(preset_data["compositions"].keys())
-            player_range = f"{min(player_counts)}人〜{max(player_counts)}人"
+        try:
+            logger.info(f"compose help 実行: {ctx.message.id}, チャンネル: {ctx.channel.id}")
+            
+            # 利用可能なプリセットを表示
+            preset_list = ", ".join(PRESETS.keys())
+            
+            embed = discord.Embed(
+                title="役職構成管理",
+                description="以下のコマンドで役職構成を管理できます。",
+                color=discord.Color.blue()
+            )
             
             embed.add_field(
-                name=f"{preset_data['name']} ({preset_id})",
-                value=f"説明: {preset_data['description']}\n対応人数: {player_range}",
+                name="プリセット一覧",
+                value="`!compose presets` - 利用可能なプリセット一覧を表示",
                 inline=False
             )
+            
+            embed.add_field(
+                name="プリセット適用",
+                value="`!compose apply [プリセット名]` - プリセット構成を適用",
+                inline=False
+            )
+            
+            embed.add_field(
+                name="カスタム構成",
+                value="`!compose custom [人数] [役職1] [数1] [役職2] [数2] ...` - カスタム役職構成を設定",
+                inline=False
+            )
+            
+            embed.add_field(
+                name="強制カスタム構成",
+                value="`!compose force [人数] [役職1] [数1] [役職2] [数2] ...` - バランスチェックを無視してカスタム構成を設定",
+                inline=False
+            )
+            
+            embed.add_field(
+                name="構成提案",
+                value="`!compose recommend [人数]` - 指定した人数に適した役職構成を提案",
+                inline=False
+            )
+            
+            embed.add_field(
+                name="現在の構成確認",
+                value="`!compose show [人数]` - 指定人数の現在の役職構成を表示",
+                inline=False
+            )
+            
+            sent_message = await ctx.send(embed=embed)
+            logger.info(f"compose help メッセージ送信成功: {ctx.channel.id}, メッセージID: {sent_message.id}")
+        finally:
+            # 3秒後にロックを解除
+            async def unlock():
+                await asyncio.sleep(3)
+                if hasattr(bot, lock_key):
+                    delattr(bot, lock_key)
+                    logger.debug(f"ヘルプ表示ロック解除: {ctx.channel.id}")
+            
+            asyncio.create_task(unlock())
+
+    # プリセット一覧表示関数（重複防止を強化）
+    async def show_presets(ctx):
+        """利用可能なプリセット一覧を表示"""
+        # 重複実行を防止するためのロック
+        channel_id = ctx.channel.id
+        lock_key = f"presets_lock_{channel_id}"
         
-        await ctx.send(embed=embed)
-        logger.info(f"compose presets メッセージ送信成功: {ctx.channel.id}")
+        if hasattr(bot, lock_key):
+            logger.debug(f"プリセット一覧表示ロック中: {ctx.channel.id}")
+            return
+        
+        # ロックを設定
+        setattr(bot, lock_key, True)
+        
+        try:
+            logger.info(f"compose presets 実行: {ctx.message.id}, チャンネル: {ctx.channel.id}")
+        
+            embed = discord.Embed(
+                title="役職構成プリセット一覧",
+                description="以下のプリセットから選択できます。`!compose apply [プリセット名]`で適用できます。",
+                color=discord.Color.green()
+            )
+            
+            for preset_id, preset_data in PRESETS.items():
+                # 各プリセットの情報を追加
+                player_counts = list(preset_data["compositions"].keys())
+                player_range = f"{min(player_counts)}人〜{max(player_counts)}人"
+                
+                embed.add_field(
+                    name=f"{preset_data['name']} ({preset_id})",
+                    value=f"説明: {preset_data['description']}\n対応人数: {player_range}",
+                    inline=False
+                )
+            
+            sent_message = await ctx.send(embed=embed)
+            logger.info(f"compose presets メッセージ送信成功: {ctx.channel.id}, メッセージID: {sent_message.id}")
+        finally:
+            # 3秒後にロックを解除
+            async def unlock():
+                await asyncio.sleep(3)
+                if hasattr(bot, lock_key):
+                    delattr(bot, lock_key)
+                    logger.debug(f"プリセット一覧表示ロック解除: {ctx.channel.id}")
+            
+            asyncio.create_task(unlock())
     
     # プリセット適用関数
     async def apply_preset(ctx, preset_name):
