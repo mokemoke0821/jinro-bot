@@ -318,57 +318,38 @@ async def on_command_error(ctx, error):
     # コマンド識別子（ログ用）
     command_id = ctx.command.qualified_name if ctx.command else f"unknown-{ctx.message.content[:20]}"
     
+    # コマンド実行時のエラー（CommandInvokeError）の場合は元の例外を取得
+    original_error = error
+    if isinstance(error, commands.CommandInvokeError):
+        original_error = error.original
+    
+    # スタックトレースの取得と表示（重要なデバッグ情報）
+    import traceback
+    tb_str = ''.join(traceback.format_exception(type(original_error), original_error, original_error.__traceback__))
+    print(f"[詳細エラー情報] コマンド: {command_id}")
+    print(f"[詳細エラー情報] エラータイプ: {type(original_error).__name__}")
+    print(f"[詳細エラー情報] エラーメッセージ: {original_error}")
+    print(f"[詳細エラー情報] スタックトレース:\n{tb_str}")
+    
+    # コルーチンに関連するエラーの場合は特別な処理
+    if "coroutine" in str(original_error) and "has no attribute" in str(original_error):
+        print(f"[重要な警告] コルーチンが正しく await されていない可能性があります！")
+        print(f"[重要な警告] エラー発生箇所を確認して await キーワードを追加してください。")
+    
     # エラー抑制フラグがある場合は何も表示しない
     if hasattr(ctx, 'suppressed_errors') and ctx.suppressed_errors:
         print(f"[ERROR_HANDLER] Suppressed display of error in {command_id}: {error}")
         return
     
-    # コマンド実行時のエラー（CommandInvokeError）の場合は元の例外を取得
-    original_error = error
-    if isinstance(error, commands.CommandInvokeError):
-        original_error = error.original
-        print(f"[ERROR_HANDLER] Original error in {command_id}: {original_error}")
-    
-    # エラーを抑制するかどうかの判定
-    should_suppress = False
-    
-    # 1. composeコマンド関連のエラーは抑制
-    if ctx.command and (
-        ctx.command.qualified_name.startswith('compose') or 
-        (hasattr(ctx.command, 'parent') and ctx.command.parent and ctx.command.parent.name == 'compose')
-    ):
-        should_suppress = True
-        print(f"[ERROR_HANDLER] Suppressing compose command error")
-    
-    # 2. エラーメッセージに特定のキーワードが含まれる場合は抑制
-    error_str = str(error) + str(original_error)
-    suppress_keywords = ['coroutine', 'attribute', 'get', 'asyncio', 'timeout', 'cancelled']
-    if any(keyword in error_str.lower() for keyword in suppress_keywords):
-        should_suppress = True
-        print(f"[ERROR_HANDLER] Suppressing error with keyword in: {error_str[:100]}")
-    
-    # 3. 特定の例外タイプは抑制
-    suppress_types = [
-        AttributeError, 
-        asyncio.TimeoutError, 
-        asyncio.CancelledError, 
-        commands.CommandNotFound
-    ]
-    if any(isinstance(original_error, err_type) for err_type in suppress_types):
-        should_suppress = True
-        print(f"[ERROR_HANDLER] Suppressing error of type: {type(original_error)}")
-        
-    # エラーを抑制する場合
-    if should_suppress:
-        # 特定の状況ではヘルプメッセージを表示
-        if ctx.command and ctx.command.qualified_name.startswith('compose'):
-            try:
-                # RoleComposerCogのメインコマンドを呼び出してヘルプを表示
-                compose_cog = bot.get_cog("RoleComposerCog")
-                if compose_cog and hasattr(compose_cog, 'compose'):
-                    await compose_cog.compose(ctx)
-            except Exception as help_e:
-                print(f"[ERROR_HANDLER] Error showing help: {help_e}")
+    # 通常のエラー処理ではヘルプメッセージを表示（compose関連のコマンドの場合）
+    if ctx.command and ctx.command.qualified_name.startswith('compose'):
+        try:
+            # RoleComposerCogのヘルプを表示
+            compose_cog = bot.get_cog("RoleComposerCog")
+            if compose_cog and hasattr(compose_cog, 'compose'):
+                await compose_cog.compose(ctx)
+        except Exception as help_e:
+            print(f"[ERROR_HANDLER] Error showing help: {help_e}")
         return
     
     # 以下は通常のエラー処理
