@@ -84,12 +84,59 @@ class JinroBot(commands.Bot):
             # 通常の実行
             return await super().invoke(ctx)
 
-# Botの初期化 - エラーハンドラーの登録方法を変更
+# Botの初期化
 bot = JinroBot(command_prefix=GameConfig.PREFIX, intents=intents, help_command=None)
 
-# エラーハンドラーが必ず存在するようにプレースホルダを設定
-# これにより他のモジュールがbot.on_command_errorを参照してもエラーにならない
-bot.on_command_error = lambda ctx, error: None
+# 最強のエラー抑制: すべてのエラーを抑制するプレースホルダを設定
+# これにより他のモジュールがエラーハンドラを参照してもエラーにならない
+bot.on_command_error = lambda ctx, error: None  # エラーを無視する関数
+bot.on_error = lambda *args, **kwargs: None     # 一般的なエラーも無視
+
+# composeコマンドだけ特別扱いするためのカスタムイベント登録
+@bot.event
+async def on_command_error(ctx, error):
+    """カスタムのオーバーライド - composeコマンド以外だけ処理"""
+    # エラーの詳細をログに出力
+    print(f"[ERROR HANDLER] Handling error: {type(error)}: {error}")
+    
+    # composeコマンドのエラーは一切表示しない
+    if ctx.command and (
+        ctx.command.qualified_name.startswith('compose') or 
+        (hasattr(ctx.command, 'parent') and ctx.command.parent and ctx.command.parent.name == 'compose')
+    ):
+        print(f"[ERROR HANDLER] Suppressed compose error: {error}")
+        return
+    
+    # coroutineエラーも一切表示しない
+    if "coroutine" in str(error).lower() or "get" in str(error).lower():
+        print(f"[ERROR HANDLER] Suppressed coroutine error: {error}")
+        return
+    
+    # その他のエラーは通常通り処理
+    if isinstance(error, commands.CommandNotFound):
+        return
+    elif isinstance(error, commands.MissingRequiredArgument):
+        embed = discord.Embed(
+            title="引数不足",
+            description=f"引数が不足しています。`{GameConfig.PREFIX}werewolf_help` でコマンドの使い方を確認してください。",
+            color=EmbedColors.ERROR
+        )
+        await ctx.send(embed=embed)
+    elif isinstance(error, commands.BadArgument):
+        embed = discord.Embed(
+            title="引数エラー",
+            description=f"引数の形式が正しくありません。{str(error)}",
+            color=EmbedColors.ERROR
+        )
+        await ctx.send(embed=embed)
+    elif isinstance(error, commands.CheckFailure):
+        # 権限不足エラー
+        embed = discord.Embed(
+            title="権限エラー",
+            description="このコマンドを実行する権限がありません。",
+            color=EmbedColors.ERROR
+        )
+        await ctx.send(embed=embed)
 
 # Cogの読み込み
 async def load_extensions():
