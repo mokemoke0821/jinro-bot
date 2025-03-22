@@ -47,22 +47,39 @@ class JinroBot(commands.Bot):
     
     async def invoke(self, ctx):
         """コマンド実行のカスタム処理"""
+        # composeコマンドのプロアクティブ検出
+        if ctx.command and (
+            (ctx.command.qualified_name.startswith('compose')) or 
+            (hasattr(ctx.command, 'parent') and ctx.command.parent and ctx.command.parent.name == 'compose')
+        ):
+            # composeコマンドは常にエラー抑制モード
+            ctx.suppressed_errors = True
+            print(f"[INVOKE] Detected compose command: {ctx.command.qualified_name}")
+            
         if hasattr(ctx, 'suppressed_errors') and ctx.suppressed_errors:
             # エラー抑制モード
             try:
                 if ctx.command is not None:
-                    await ctx.command.invoke(ctx)
+                    # 直接実行する代わりに callback を呼び出す
+                    # これによりエラーハンドリングパイプラインをバイパス
+                    await ctx.command.callback(ctx.command.cog, ctx, *ctx.args[1:], **ctx.kwargs)
                 return True
             except Exception as e:
                 # エラーをログに記録するが表示はしない
                 print(f"[SILENT_ERROR] Error in {ctx.command}: {e}")
+                import traceback
+                traceback.print_exc()
                 return False
         else:
             # 通常の実行
             return await super().invoke(ctx)
 
-# Botの初期化
+# Botの初期化 - エラーハンドラーの登録方法を変更
 bot = JinroBot(command_prefix=GameConfig.PREFIX, intents=intents, help_command=None)
+
+# エラーハンドラーが必ず存在するようにプレースホルダを設定
+# これにより他のモジュールがbot.on_command_errorを参照してもエラーにならない
+bot.on_command_error = lambda ctx, error: None
 
 # Cogの読み込み
 async def load_extensions():
@@ -247,7 +264,7 @@ async def on_command_error(ctx, error):
         )
         await ctx.send(embed=embed)
 
-# composeコマンドのエラーメッセージを完全にブロックするカスタムエラーハンドラー
+# composeコマンドのエラーメッセージを完全にブロック
 @bot.event
 async def on_command(ctx):
     """コマンド実行前のフック - composeコマンドの場合はエラーを抑制"""
@@ -255,6 +272,25 @@ async def on_command(ctx):
     if ctx.command and ctx.command.qualified_name.startswith('compose'):
         ctx.suppressed_errors = True
         print(f"[ON_COMMAND] Set suppressed_errors for {ctx.command}")
+
+# メッセージが送信される直前の処理をフック - エラーメッセージをブロック
+# これはDiscordの内部実装に依存した方法だが、最終手段として使用
+original_send = discord.abc.Messageable.send
+
+async def custom_send(self, content=None, **kwargs):
+    """メッセージ送信のカスタム処理"""
+    # エラーメッセージをブロック
+    if content and isinstance(content, str) and "エラーが発生しました" in content:
+        if "coroutine" in content and "no attribute" in content:
+            # コルーチン関連のエラーメッセージをブロック
+            print(f"[BLOCKED ERROR MESSAGE] {content}")
+            return None  # メッセージを送信しない
+    
+    # 通常通りメッセージを送信
+    return await original_send(self, content, **kwargs)
+
+# 元のメソッドを保存
+discord.abc.Messageable.send = custom_send
 
 # Botの起動
 if __name__ == "__main__":

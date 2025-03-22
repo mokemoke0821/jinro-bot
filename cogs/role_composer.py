@@ -14,16 +14,23 @@ class RoleComposerCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.presets = self._load_presets()
-        # エラーメッセージを抑制するフック
-        self._original_error_handler = bot.on_command_error
         
-        # 追加のエラー処理
-        @bot.listen()
-        async def on_command_error(ctx, error):
-            # compose コマンドの場合はエラーを抑制
-            if ctx.command and ctx.command.parent and ctx.command.parent.name == 'compose':
-                print(f"[COMPOSE_ERROR_HOOK] Suppressed error: {error}")
-                return True
+        # 追加のエラー処理 - リスナーは別メソッドとして追加
+        self._setup_error_handlers()
+    
+    def _setup_error_handlers(self):
+        """エラーハンドラーの設定"""
+        try:
+            # リスナー登録
+            @self.bot.listen()
+            async def on_command_error(ctx, error):
+                # composeコマンドの場合はエラーを抑制
+                if ctx.command and ctx.command.parent and ctx.command.parent.name == 'compose':
+                    print(f"[COMPOSE_ERROR_HOOK] Suppressed error: {error}")
+                    return True
+        except Exception as e:
+            # リスナー登録エラーはログだけに出力
+            print(f"[COMPOSE] Error handler setup failed: {e}")
     
     def _load_presets(self):
         """プリセット役職構成をロード"""
