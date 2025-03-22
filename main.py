@@ -10,8 +10,20 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 if current_dir not in sys.path:
     sys.path.append(current_dir)
 
-# *** 重要 ***
-# Discord.pyのモジュールをロードする前にエラーハンドリングパッチを適用
+# *** 最優先 ***
+# Discord.pyをインポートする前に、最も強力な統合フックシステムを適用
+try:
+    # 新しいフックシステムをロード
+    from bot_hooks import apply_all_hooks
+    hook_result = apply_all_hooks()
+    print(f"Bot hooks applied: {hook_result}")
+except ImportError:
+    print("WARNING: Could not load bot_hooks module")
+except Exception as e:
+    print(f"ERROR: Failed to apply hooks: {e}")
+    traceback.print_exc()
+
+# 旧エラーハンドリングパッチも一応適用
 try:
     import discord_error_patch
     print("Discord error patch loaded")
@@ -24,6 +36,22 @@ try:
     print(f"Message filter will be applied later")
 except Exception as e:
     print(f"WARNING: Could not set up message filter: {e}")
+
+# 特殊テクニック: CSSスタイルでエラーメッセージを非表示にする試み
+ERROR_CSS_TRICK = """
+<style>
+  .errorMessage, div[class*="error"], div[class*="Error"] {
+    display: none !important;
+    visibility: hidden !important;
+    height: 0 !important;
+    width: 0 !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
+    position: absolute !important;
+    z-index: -9999 !important;
+  }
+</style>
+"""
 
 # 最強のパッチを適用
 try:
