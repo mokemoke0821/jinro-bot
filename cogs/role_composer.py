@@ -15,34 +15,8 @@ class RoleComposerCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         
-        # 直接_load_presetsを呼び出して結果を保存
-        print("[DEBUG] Initializing RoleComposerCog")
-        self.presets = self._load_presets()
-        print(f"[DEBUG] Presets loaded: {type(self.presets)}")
-        print(f"[DEBUG] Presets keys: {list(self.presets.keys())}")
-        
-        # 追加のエラー処理 - リスナーは別メソッドとして追加
-        self._setup_error_handlers()
-    
-    def _setup_error_handlers(self):
-        """エラーハンドラーの設定"""
-        try:
-            # リスナー登録
-            @self.bot.listen()
-            async def on_command_error(ctx, error):
-                # composeコマンドの場合はエラーを抑制
-                if ctx.command and ctx.command.parent and ctx.command.parent.name == 'compose':
-                    print(f"[COMPOSE_ERROR_HOOK] Suppressed error: {error}")
-                    return True
-        except Exception as e:
-            # リスナー登録エラーはログだけに出力
-            print(f"[COMPOSE] Error handler setup failed: {e}")
-    
-    # 非同期から同期関数に変更 - 単なる静的データなので非同期にする必要はない
-    def _load_presets(self):
-        """プリセット役職構成をロード - 静的データなので非同期である必要はない"""
-        # ハードコーディングされたプリセット情報を返す
-        presets = {
+        # 標準の静的プリセット
+        self.presets = {
             "standard": {
                 "name": "標準",
                 "description": "基本的な役職構成です。",
@@ -89,27 +63,13 @@ class RoleComposerCog(commands.Cog):
                 }
             }
         }
-        
-        # ログ出力して戻り値の型を確認（デバッグ用）
-        print(f"[DEBUG] _load_presets returning: {type(presets)}")
-        print(f"[DEBUG] presets keys: {presets.keys()}")
-        
-        return presets
+    
+    # =================== ベースコマンド ===================
     
     @commands.group(name="compose", invoke_without_command=True)
     @commands.has_permissions(administrator=True)
-    async def compose(self, ctx):
-        """役職構成を管理するコマンドグループ"""
-        # すでに処理済みのメッセージは無視（重複表示防止）
-        if hasattr(ctx.bot, '_processed_help_ids') and ctx.message.id in ctx.bot._processed_help_ids:
-            print(f"[COMPOSE] Skipping already processed help message")
-            return
-
-        # 処理済みとしてマーク
-        if not hasattr(ctx.bot, '_processed_help_ids'):
-            ctx.bot._processed_help_ids = set()
-        ctx.bot._processed_help_ids.add(ctx.message.id)
-        
+    async def compose_base(self, ctx):
+        """役職構成を管理するコマンドグループのヘルプを表示"""
         # 利用可能なプリセットを表示
         preset_list = ", ".join(self.presets.keys())
         
@@ -121,7 +81,7 @@ class RoleComposerCog(commands.Cog):
         
         embed.add_field(
             name="プリセット一覧",
-            value="`!compose presets` - プリセット一覧を表示",
+            value="`!compose presets` - 利用可能なプリセット一覧を表示",
             inline=False
         )
         
@@ -143,12 +103,11 @@ class RoleComposerCog(commands.Cog):
             inline=False
         )
         
-        try:
-            await ctx.send(embed=embed)
-        except Exception as e:
-            print(f"[COMPOSE] Error sending help embed: {e}")
+        await ctx.send(embed=embed)
     
-    @compose.command(name="presets")
+    # =================== プリセット表示 ===================
+    
+    @compose_base.command(name="presets")
     async def show_presets(self, ctx):
         """利用可能なプリセット一覧を表示"""
         embed = discord.Embed(
@@ -167,136 +126,63 @@ class RoleComposerCog(commands.Cog):
         embed.set_footer(text="プリセットを適用するには !compose apply [プリセット名] を使用してください。")
         await ctx.send(embed=embed)
     
-    @compose.command(name="apply")
+    # =================== プリセット適用 ===================
+    
+    @compose_base.command(name="apply")
     @commands.has_permissions(administrator=True)
     async def apply_preset(self, ctx, preset_id=None):
-        """プリセット構成を適用する安全実装"""
-        print("[DEBUG] apply_preset called with preset_id:", preset_id)
+        """プリセット構成を適用する"""
+        # パラメータチェック
+        if preset_id is None:
+            preset_list = ", ".join([f"`{name}`" for name in self.presets.keys()])
+            await ctx.send(f"プリセット名を指定してください。例: `!compose apply standard`\n\n利用可能なプリセット: {preset_list}")
+            return
+            
+        # 前処理: トリミングと小文字変換
+        preset_id = preset_id.strip().lower()
         
-        # 安全な実装でエラーハンドリング
-        try:
-            # 直接実装してエラーを回避
-            if preset_id is None:
-                # プリセット名のリストを作成
-                preset_list = ", ".join([f"{name}" for name in self.presets.keys()])
-                print(f"[DEBUG] No preset_id provided. Available presets: {preset_list}")
-                await ctx.send(f"プリセット名を指定してください。例: `!compose apply standard`\n\n利用可能なプリセット: {preset_list}")
-                return
-            
-            print(f"[DEBUG] Processing preset_id: {preset_id}")
-            print(f"[DEBUG] self.presets type: {type(self.presets)}")
-            print(f"[DEBUG] self.presets keys: {self.presets.keys() if hasattr(self.presets, 'keys') else 'No keys method'}")
-            
-            # 前処理: トリミングと小文字変換
-            preset_id = preset_id.strip().lower()
-            
-            # プリセットの存在確認（大文字小文字を区別しない）
-            preset_key = None
-            for key in self.presets.keys():
-                if key.lower() == preset_id:
-                    preset_key = key
-                    break
-                    
-            if preset_key is None:
-                preset_list = ", ".join([f"{name}" for name in self.presets.keys()])
-                print(f"[DEBUG] Preset {preset_id} not found. Available presets: {preset_list}")
-                await ctx.send(f"プリセット `{preset_id}` は存在しません。\n利用可能なプリセット: {preset_list}")
-                return
-            
-            # 見つかったキーを使用
-            preset_id = preset_key
-            print(f"[DEBUG] Using preset key: {preset_id}")
-            
-            try:
-                preset_name = self.presets[preset_id]['name']
-                preset_desc = self.presets[preset_id]['description']
-                print(f"[DEBUG] Found preset: {preset_name}")
-            except Exception as key_e:
-                print(f"[DEBUG] Error accessing preset data: {key_e}")
-                traceback.print_exc()
-                await ctx.send(f"プリセットデータの読み込み中にエラーが発生しました。")
-                return
-            
-            # 成功メッセージを先に送信
-            await ctx.send(f"✅ プリセット「{preset_name}」を適用しました。")
-            
-            # 構成内容表示
-            embed = discord.Embed(
-                title=f"プリセット「{preset_name}」の構成",
-                description=f"{preset_desc}",
-                color=discord.Color.green()
-            )
-            
-            for player_count, composition in sorted(self.presets[preset_id]["compositions"].items(), key=lambda x: int(x[0])):
-                roles_text = ", ".join([f"{role}: {count}" for role, count in composition.items()])
-                embed.add_field(
-                    name=f"{player_count}人用",
-                    value=roles_text,
-                    inline=False
-                )
-            
-            await ctx.send(embed=embed)
-            
-            # データを保存
-            await self._save_preset_config(ctx.guild.id, preset_id)
+        # プリセットの存在確認（大文字小文字を区別しない）
+        preset_key = None
+        for key in self.presets.keys():
+            if key.lower() == preset_id:
+                preset_key = key
+                break
                 
-        except Exception as e:
-            # エラーをログに出力してユーザーにもエラーメッセージを表示
-            print(f"[COMPOSE] Error in apply_preset: {e}")
-            traceback.print_exc()
-            await ctx.send(f"プリセットの適用中にエラーが発生しました: {str(e)}")
+        if preset_key is None:
+            preset_list = ", ".join([f"`{name}`" for name in self.presets.keys()])
+            await ctx.send(f"プリセット `{preset_id}` は存在しません。\n利用可能なプリセット: {preset_list}")
+            return
+        
+        # 見つかったキーを使用
+        preset_id = preset_key
+        preset = self.presets[preset_id]
+        
+        # 成功メッセージを先に送信
+        await ctx.send(f"✅ プリセット「{preset['name']}」を適用しました。")
+        
+        # 構成内容表示
+        embed = discord.Embed(
+            title=f"プリセット「{preset['name']}」の構成",
+            description=f"{preset['description']}",
+            color=discord.Color.green()
+        )
+        
+        for player_count, composition in sorted(preset["compositions"].items(), key=lambda x: int(x[0])):
+            roles_text = ", ".join([f"{role}: {count}" for role, count in composition.items()])
+            embed.add_field(
+                name=f"{player_count}人用",
+                value=roles_text,
+                inline=False
+            )
+        
+        await ctx.send(embed=embed)
+        
+        # データを保存 - 非同期で実行
+        await self._save_preset_config(ctx.guild.id, preset_id)
     
-    async def _save_preset_config(self, guild_id, preset_id):
-        """プリセット設定をファイルに保存する"""
-        try:
-            # ディレクトリが存在することを確認
-            os.makedirs("data/config", exist_ok=True)
-            
-            # 設定ファイルパスを作成
-            config_path = f"data/config/server_{guild_id}.json"
-            
-            # 既存の設定を読み込む（存在しない場合はデフォルト設定を使用）
-            try:
-                with open(config_path, "r", encoding="utf-8") as f:
-                    settings = json.load(f)
-            except (FileNotFoundError, json.JSONDecodeError):
-                settings = {
-                    "roles_config": {},
-                    "game_rules": {
-                        "no_first_night_kill": False,
-                        "lovers_enabled": False,
-                        "no_consecutive_guard": True,
-                        "random_tied_vote": False,
-                        "dead_chat_enabled": True
-                    },
-                    "timers": {
-                        "day": 300,
-                        "night": 90,
-                        "voting": 60
-                    }
-                }
-            
-            # roles_configを確保
-            if "roles_config" not in settings:
-                settings["roles_config"] = {}
-            
-            # プリセットの構成をコピー
-            for player_count, composition in self.presets[preset_id]["compositions"].items():
-                settings["roles_config"][player_count] = composition
-            
-            # 設定をファイルに保存
-            with open(config_path, "w", encoding="utf-8") as f:
-                json.dump(settings, f, ensure_ascii=False, indent=2)
-            
-            print(f"[COMPOSE] Successfully saved preset {preset_id} for server {guild_id}")
-            return True
-        except Exception as e:
-            # エラーをログに出力するだけ
-            print(f"[COMPOSE] Error saving preset: {e}")
-            traceback.print_exc()
-            return False
+    # =================== カスタム構成設定 ===================
     
-    @compose.command(name="custom")
+    @compose_base.command(name="custom")
     @commands.has_permissions(administrator=True)
     async def set_custom_composition(self, ctx, player_count: int, *args):
         """カスタム役職構成を設定"""
@@ -347,57 +233,9 @@ class RoleComposerCog(commands.Cog):
         # 設定を保存
         await self._save_custom_composition(ctx.guild.id, player_count, composition)
     
-    async def _save_custom_composition(self, guild_id, player_count, composition):
-        """カスタム役職構成をファイルに保存する"""
-        try:
-            # ディレクトリが存在することを確認
-            os.makedirs("data/config", exist_ok=True)
-            
-            # 設定ファイルパスを作成
-            config_path = f"data/config/server_{guild_id}.json"
-            
-            # 既存の設定を読み込む（存在しない場合はデフォルト設定を使用）
-            try:
-                with open(config_path, "r", encoding="utf-8") as f:
-                    settings = json.load(f)
-            except (FileNotFoundError, json.JSONDecodeError):
-                settings = {
-                    "roles_config": {},
-                    "game_rules": {
-                        "no_first_night_kill": False,
-                        "lovers_enabled": False,
-                        "no_consecutive_guard": True,
-                        "random_tied_vote": False,
-                        "dead_chat_enabled": True
-                    },
-                    "timers": {
-                        "day": 300,
-                        "night": 90,
-                        "voting": 60
-                    }
-                }
-            
-            # roles_configを確保
-            if "roles_config" not in settings:
-                settings["roles_config"] = {}
-            
-            # カスタム構成を保存
-            settings["roles_config"][str(player_count)] = composition
-            
-            # 設定をファイルに保存
-            with open(config_path, "w", encoding="utf-8") as f:
-                json.dump(settings, f, ensure_ascii=False, indent=2)
-            
-            print(f"[COMPOSE] Successfully saved custom composition for {player_count} players in server {guild_id}")
-            return True
-            
-        except Exception as e:
-            # エラーをログに出力するだけ
-            print(f"[COMPOSE] Error saving custom composition: {e}")
-            traceback.print_exc()
-            return False
+    # =================== バランス無視の構成設定 ===================
     
-    @compose.command(name="force")
+    @compose_base.command(name="force")
     @commands.has_permissions(administrator=True)
     async def force_custom_composition(self, ctx, player_count: int, *args):
         """警告を無視してカスタム役職構成を強制設定"""
@@ -450,71 +288,194 @@ class RoleComposerCog(commands.Cog):
         # 設定を保存
         await self._save_custom_composition(ctx.guild.id, player_count, composition)
     
-    @compose.command(name="show")
+    # =================== 構成表示 ===================
+    
+    @compose_base.command(name="show")
     async def show_composition(self, ctx, player_count: int = None):
         """現在の役職構成を表示"""
-        print(f"[DEBUG] show_composition called with player_count: {player_count}")
+        # 設定ファイルから読み込み
+        config_data = await self._load_server_config(ctx.guild.id)
+        if not config_data or "roles_config" not in config_data or not config_data["roles_config"]:
+            await ctx.send("役職構成が設定されていません。")
+            return
+            
+        # roles_configを取得
+        roles_config = config_data["roles_config"]
         
+        if player_count is not None:
+            # 指定人数の構成を表示
+            player_count_str = str(player_count)
+            if player_count_str not in roles_config:
+                await ctx.send(f"{player_count}人用の役職構成は設定されていません。")
+                return
+            
+            composition = roles_config[player_count_str]
+            embed = discord.Embed(
+                title=f"{player_count}人用の役職構成",
+                color=discord.Color.blue()
+            )
+            
+            roles_text = "\n".join([f"- {role}: {count}人" for role, count in composition.items()])
+            embed.description = roles_text
+            
+            await ctx.send(embed=embed)
+        else:
+            # すべての人数の構成を表示
+            embed = discord.Embed(
+                title="役職構成一覧",
+                description="各プレイヤー数の役職構成は以下の通りです。",
+                color=discord.Color.blue()
+            )
+            
+            for player_count, composition in sorted(roles_config.items(), key=lambda x: int(x[0])):
+                roles_text = ", ".join([f"{role}: {count}" for role, count in composition.items()])
+                embed.add_field(
+                    name=f"{player_count}人用",
+                    value=roles_text,
+                    inline=False
+                )
+            
+            await ctx.send(embed=embed)
+    
+    # =================== 推奨構成提案 ===================
+    
+    @compose_base.command(name="recommend")
+    async def recommend_composition(self, ctx, player_count: int):
+        """指定した人数に適した役職構成を提案"""
+        if player_count < 5:
+            await ctx.send("プレイヤー数は5人以上である必要があります。")
+            return
+        
+        role_balancer = self.bot.get_cog("RoleBalancer")
+        if not role_balancer:
+            await ctx.send("RoleBalancerが見つかりません。")
+            return
+        
+        # 推奨構成を取得
+        recommended = role_balancer.get_recommended_composition(player_count)
+        if not recommended:
+            await ctx.send(f"{player_count}人用の推奨構成が見つかりません。")
+            return
+        
+        # 提案を表示
+        embed = discord.Embed(
+            title=f"{player_count}人用の推奨役職構成",
+            description="以下の役職構成をおすすめします。",
+            color=discord.Color.green()
+        )
+        
+        roles_text = "\n".join([f"- {role}: {count}人" for role, count in recommended.items()])
+        embed.description = f"以下の役職構成をおすすめします：\n\n{roles_text}"
+        
+        # 適用用のコマンド例を追加
+        cmd_example = "!compose custom " + str(player_count) + " " + " ".join([f"{role} {count}" for role, count in recommended.items()])
+        embed.add_field(
+            name="この構成を適用するには",
+            value=f"以下のコマンドを使用してください：\n`{cmd_example}`",
+            inline=False
+        )
+        
+        await ctx.send(embed=embed)
+    
+    # =================== ユーティリティ関数 ===================
+    
+    async def _save_preset_config(self, guild_id, preset_id):
+        """プリセット設定をファイルに保存する"""
         try:
-            # 設定を取得
-            print(f"[DEBUG] Loading server config for guild: {ctx.guild.id}")
-            config_data = await self._load_server_config(ctx.guild.id)
-            print(f"[DEBUG] Config data loaded: {type(config_data)}")
+            # ディレクトリが存在することを確認
+            os.makedirs("data/config", exist_ok=True)
             
-            if not config_data:
-                print(f"[DEBUG] No config data found")
-                await ctx.send("役職構成が設定されていません。")
-                return
-                
-            # roles_configを取得
-            roles_config = config_data.get("roles_config", {})
-            print(f"[DEBUG] Roles config: {type(roles_config)}")
+            # 設定ファイルパスを作成
+            config_path = f"data/config/server_{guild_id}.json"
             
-            if not roles_config:
-                print(f"[DEBUG] No roles config found")
-                await ctx.send("役職構成が設定されていません。")
-                return
+            # 既存の設定を読み込む（存在しない場合はデフォルト設定を使用）
+            try:
+                with open(config_path, "r", encoding="utf-8") as f:
+                    settings = json.load(f)
+            except (FileNotFoundError, json.JSONDecodeError):
+                settings = {
+                    "roles_config": {},
+                    "game_rules": {
+                        "no_first_night_kill": False,
+                        "lovers_enabled": False,
+                        "no_consecutive_guard": True,
+                        "random_tied_vote": False,
+                        "dead_chat_enabled": True
+                    },
+                    "timers": {
+                        "day": 300,
+                        "night": 90,
+                        "voting": 60
+                    }
+                }
             
-            if player_count is not None:
-                # 指定人数の構成を表示
-                player_count_str = str(player_count)
-                if player_count_str not in roles_config:
-                    await ctx.send(f"{player_count}人用の役職構成は設定されていません。")
-                    return
-                
-                composition = roles_config[player_count_str]
-                embed = discord.Embed(
-                    title=f"{player_count}人用の役職構成",
-                    color=discord.Color.blue()
-                )
-                
-                roles_text = "\n".join([f"- {role}: {count}人" for role, count in composition.items()])
-                embed.description = roles_text
-                
-                await ctx.send(embed=embed)
-            else:
-                # すべての人数の構成を表示
-                embed = discord.Embed(
-                    title="役職構成一覧",
-                    description="各プレイヤー数の役職構成は以下の通りです。",
-                    color=discord.Color.blue()
-                )
-                
-                for player_count, composition in sorted(roles_config.items(), key=lambda x: int(x[0])):
-                    roles_text = ", ".join([f"{role}: {count}" for role, count in composition.items()])
-                    embed.add_field(
-                        name=f"{player_count}人用",
-                        value=roles_text,
-                        inline=False
-                    )
-                
-                await ctx.send(embed=embed)
+            # roles_configを確保
+            if "roles_config" not in settings:
+                settings["roles_config"] = {}
+            
+            # プリセットの構成をコピー
+            for player_count, composition in self.presets[preset_id]["compositions"].items():
+                settings["roles_config"][player_count] = composition
+            
+            # 設定をファイルに保存
+            with open(config_path, "w", encoding="utf-8") as f:
+                json.dump(settings, f, ensure_ascii=False, indent=2)
+            
+            return True
         except Exception as e:
-            # エラーをログに出力してユーザーにもエラーメッセージを表示
-            print(f"[COMPOSE] Error in show_composition: {e}")
+            # エラーをログに出力するだけ
+            print(f"[COMPOSE] Error saving preset: {e}")
             traceback.print_exc()
-            await ctx.send(f"役職構成の取得中にエラーが発生しました。")
+            return False
+    
+    async def _save_custom_composition(self, guild_id, player_count, composition):
+        """カスタム役職構成をファイルに保存する"""
+        try:
+            # ディレクトリが存在することを確認
+            os.makedirs("data/config", exist_ok=True)
             
+            # 設定ファイルパスを作成
+            config_path = f"data/config/server_{guild_id}.json"
+            
+            # 既存の設定を読み込む（存在しない場合はデフォルト設定を使用）
+            try:
+                with open(config_path, "r", encoding="utf-8") as f:
+                    settings = json.load(f)
+            except (FileNotFoundError, json.JSONDecodeError):
+                settings = {
+                    "roles_config": {},
+                    "game_rules": {
+                        "no_first_night_kill": False,
+                        "lovers_enabled": False,
+                        "no_consecutive_guard": True,
+                        "random_tied_vote": False,
+                        "dead_chat_enabled": True
+                    },
+                    "timers": {
+                        "day": 300,
+                        "night": 90,
+                        "voting": 60
+                    }
+                }
+            
+            # roles_configを確保
+            if "roles_config" not in settings:
+                settings["roles_config"] = {}
+            
+            # カスタム構成を保存
+            settings["roles_config"][str(player_count)] = composition
+            
+            # 設定をファイルに保存
+            with open(config_path, "w", encoding="utf-8") as f:
+                json.dump(settings, f, ensure_ascii=False, indent=2)
+            
+            return True
+        except Exception as e:
+            # エラーをログに出力するだけ
+            print(f"[COMPOSE] Error saving custom composition: {e}")
+            traceback.print_exc()
+            return False
+    
     async def _load_server_config(self, guild_id):
         """サーバーの設定をロードする"""
         try:
@@ -532,50 +493,7 @@ class RoleComposerCog(commands.Cog):
             print(f"[COMPOSE] Error loading config: {e}")
             traceback.print_exc()
             return None
-    
-    @compose.command(name="recommend")
-    async def recommend_composition(self, ctx, player_count: int):
-        """指定した人数に適した役職構成を提案"""
-        if player_count < 5:
-            await ctx.send("プレイヤー数は5人以上である必要があります。")
-            return
-        
-        role_balancer = self.bot.get_cog("RoleBalancer")
-        if not role_balancer:
-            await ctx.send("RoleBalancerが見つかりません。")
-            return
-        
-        try:
-            # 推奨構成を取得
-            recommended = role_balancer.get_recommended_composition(player_count)
-            if not recommended:
-                await ctx.send(f"{player_count}人用の推奨構成が見つかりません。")
-                return
-            
-            # 提案を表示
-            embed = discord.Embed(
-                title=f"{player_count}人用の推奨役職構成",
-                description="以下の役職構成をおすすめします。",
-                color=discord.Color.green()
-            )
-            
-            roles_text = "\n".join([f"- {role}: {count}人" for role, count in recommended.items()])
-            embed.description = f"以下の役職構成をおすすめします：\n\n{roles_text}"
-            
-            # 適用用のコマンド例を追加
-            cmd_example = "!compose custom " + str(player_count) + " " + " ".join([f"{role} {count}" for role, count in recommended.items()])
-            embed.add_field(
-                name="この構成を適用するには",
-                value=f"以下のコマンドを使用してください：\n`{cmd_example}`",
-                inline=False
-            )
-            
-            await ctx.send(embed=embed)
-        except Exception as e:
-            # エラーをログに出力してユーザーにもエラーメッセージを表示
-            print(f"[COMPOSE] Error in recommend_composition: {e}")
-            traceback.print_exc()
-            await ctx.send(f"役職構成の推奨中にエラーが発生しました。")
 
+# Bot起動時のCog登録
 async def setup(bot):
     await bot.add_cog(RoleComposerCog(bot))
