@@ -280,29 +280,45 @@ async def on_ready():
         await load_extensions()
         print("すべてのCogの読み込みに成功しました")
         
-        # 直接コマンド登録 - プラグインから独立した修正対応
+        # 直接コマンド登録 - 修正版ハンドラーを使用（重複実行防止）
         try:
             # コマンド登録済みかどうかを確認するフラグ
-            if not getattr(bot, "_direct_compose_setup_done", False):
+            if not getattr(bot, "_fixed_compose_setup_done", False):
+                # 修正版のComposeハンドラーを設定
+                print("修正版Composeハンドラーを設定します...")
+                
                 # 直接コマンドをインポートして設定
                 import sys
                 from importlib import reload
                 
-                # モジュールを再読み込みする
+                # 念のためモジュールを再読み込み
                 if "direct_compose" in sys.modules:
                     reload(sys.modules["direct_compose"])
+                if "fixed_compose_handler" in sys.modules:
+                    reload(sys.modules["fixed_compose_handler"])
                 
-                from direct_compose import setup_commands
-                setup_commands(bot)
+                # 修正版ハンドラーを設定
+                from fixed_compose_handler import setup_fixed_compose_handler
+                handler = setup_fixed_compose_handler(bot)
                 
                 # 登録完了フラグを設定
-                bot._direct_compose_setup_done = True
-                print("直接コマンド設定が完了しました")
+                bot._fixed_compose_setup_done = True
+                print(f"修正版Composeハンドラー設定が完了しました: {handler}")
             else:
-                print("直接コマンドは既に設定されています")
+                print("修正版Composeハンドラーは既に設定されています")
         except Exception as cmd_error:
-            print(f"直接コマンド設定でエラーが発生しました: {cmd_error}")
+            print(f"Composeハンドラー設定でエラーが発生しました: {cmd_error}")
             traceback.print_exc()
+            
+            # エラーが発生した場合は、従来の方法でセットアップを試みる
+            try:
+                print("従来の方法でのsetup_commandsを試みます...")
+                from direct_compose import setup_commands
+                setup_commands(bot)
+                print("従来の方法でのsetup_commands成功")
+            except Exception as e:
+                print(f"従来の方法でのsetup_commandsも失敗: {e}")
+                traceback.print_exc()
     except Exception as e:
         print(f"Cogの読み込み中にエラーが発生しました: {e}")
         traceback.print_exc()
