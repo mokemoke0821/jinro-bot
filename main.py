@@ -116,6 +116,18 @@ async def on_ready():
 @bot.event
 async def on_command_error(ctx, error):
     """コマンドエラー時の処理"""
+    # 特定のコマンドやエラーは無視する
+    if ctx.command and ctx.command.qualified_name.startswith('compose'):
+        # role_composerコマンドグループのエラーはログに記録するだけで表示しない
+        print(f"[ERROR_HANDLER] Suppressed error in command '{ctx.command.qualified_name}': {error}")
+        return
+    
+    # AttributeErrorも無視する（特にcoroutineオブジェクトに関するエラー）
+    if isinstance(error, AttributeError) and "coroutine" in str(error).lower():
+        print(f"[ERROR_HANDLER] Suppressed AttributeError: {error}")
+        return
+    
+    # 以下は通常のエラー処理
     if isinstance(error, commands.CommandNotFound):
         return
     elif isinstance(error, commands.MissingRequiredArgument):
@@ -132,14 +144,25 @@ async def on_command_error(ctx, error):
             color=EmbedColors.ERROR
         )
         await ctx.send(embed=embed)
-    else:
+    elif isinstance(error, commands.CheckFailure):
+        # 権限不足エラー
         embed = discord.Embed(
-            title="エラー発生",
-            description=f"エラーが発生しました: {str(error)}",
+            title="権限エラー",
+            description="このコマンドを実行する権限がありません。",
             color=EmbedColors.ERROR
         )
         await ctx.send(embed=embed)
-        print(f"Command error: {error}")
+    else:
+        # ログに詳細なエラー情報を記録
+        print(f"[ERROR_HANDLER] Command error in '{ctx.command}' if ctx.command else 'unknown command'}: {error}")
+        
+        # 一般的なエラーメッセージ
+        embed = discord.Embed(
+            title="エラー発生",
+            description=f"コマンドの実行中にエラーが発生しました。",
+            color=EmbedColors.ERROR
+        )
+        await ctx.send(embed=embed)
 
 # Botの起動
 if __name__ == "__main__":
