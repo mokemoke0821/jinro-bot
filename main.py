@@ -30,6 +30,18 @@ try:
 except ImportError:
     print("WARNING: Could not load discord_error_patch module")
 
+# 重複メッセージ防止パッチを適用
+try:
+    import message_deduplicator
+    print("Message deduplicator loaded")
+except ImportError:
+    print("WARNING: Could not load message_deduplicator module")
+    message_deduplicator = None
+except Exception as e:
+    print(f"ERROR: Failed to load message_deduplicator: {e}")
+    traceback.print_exc()
+    message_deduplicator = None
+
 # さらに強力なメッセージフィルタリングを適用
 try:
     # メッセージフィルタを適用（後でdiscordモジュールをインポートした後に実行）
@@ -276,6 +288,15 @@ async def on_ready():
     print(f'Bot ID: {bot.user.id}')
     
     try:
+        # メッセージ重複防止機能を適用
+        if message_deduplicator:
+            try:
+                message_deduplicator.patch_bot(bot)
+                print("メッセージ重複防止パッチを適用しました")
+            except Exception as e:
+                print(f"メッセージ重複防止パッチの適用に失敗しました: {e}")
+                traceback.print_exc()
+
         # Cogを読み込む
         await load_extensions()
         print("すべてのCogの読み込みに成功しました")
@@ -331,7 +352,7 @@ async def on_ready():
 # コマンド実行追跡用
 processed_messages = set()
 
-# コマンド処理前のフック - メッセージ内容に基づいてエラー表示を制御
+# コマンド処理前のフック - 最小化バージョン（重複防止パッチが主な処理を行う）
 @bot.event
 async def on_message(message):
     """メッセージを受信したときの処理"""
@@ -339,73 +360,10 @@ async def on_message(message):
     if message.author.bot:
         return
     
-    # メッセージIDとチャネルIDを組み合わせたユニークなキー
-    message_key = f"{message.channel.id}_{message.id}"
-    
-    # 重複処理チェック - 同じメッセージが複数回処理されないようにする
-    if message_key in processed_messages:
-        print(f"[DUPLICATE] Message {message_key} already processed, skipping")
-        return
-    
-    # このメッセージを処理済みとしてマーク
-    processed_messages.add(message_key)
-    
-    # 古いメッセージIDをクリーンアップ（最大1000件を保持）
-    if len(processed_messages) > 1000:
-        processed_messages.clear()
-        print("[CLEANUP] Cleared processed messages cache")
-    
-    # チャンネルごとの連続コマンド実行防止（特にcomposeコマンド用）
-    if message.content.startswith(bot.command_prefix):
-        command_text = message.content[len(bot.command_prefix):]
-        channel_id = message.channel.id
-        channel_lock_key = f"{channel_id}_last_command"
-        
-        # 同じチャンネルでの最後のコマンド実行時刻
-        current_time = asyncio.get_event_loop().time()
-        last_execution = getattr(bot, '_channel_command_locks', {}).get(channel_lock_key, 0)
-        
-        # composeコマンドの場合はチャンネルロックを確認
-        if command_text.startswith('compose') and current_time - last_execution < 3.0:  # 3秒間のクールダウン
-            print(f"[THROTTLE] Command in channel {channel_id} throttled (last execution: {current_time - last_execution:.2f}s ago)")
-            return
-        
-        # チャンネルロックを更新
-        if not hasattr(bot, '_channel_command_locks'):
-            bot._channel_command_locks = {}
-        bot._channel_command_locks[channel_lock_key] = current_time
-        
-        print(f"[COMMAND] Received: {command_text} from {message.author.id} in {message.guild.id if message.guild else 'DM'}")
-        
-        # composeコマンドの場合は特別処理
-        if command_text.startswith('compose'):
-            try:
-                # コンテキストを取得し、エラー抑制フラグを設定
-                ctx = await bot.get_context(message)
-                ctx.suppressed_errors = True
-                
-                # コマンド引数を解析（スペースで分割）
-                parts = command_text.split()
-                # サブコマンドがある場合
-                if len(parts) > 1:
-                    subcommand = parts[1].lower()
-                    print(f"[COMPOSE] サブコマンド: {subcommand}")
-                
-                # ログに記録
-                log_user_id = message.author.id
-                log_guild_id = message.guild.id if message.guild else "DM"
-                print(f"[COMPOSE] User {log_user_id} in {log_guild_id} executed: {command_text}")
-                
-            except Exception as e:
-                print(f"[COMPOSE_ERROR] コマンド解析中にエラー: {e}")
-                traceback.print_exc()
-    
     # 通常のコマンド処理
-    try:
-        await bot.process_commands(message)
-    except Exception as e:
-        print(f"[PROCESS_ERROR] コマンド処理中にエラー: {e}")
-        traceback.print_exc()
+    # 重複防止パッチがprocess_commandsを上書きしているので、
+    # ここで複雑な処理は行わない
+    await bot.process_commands(message)
 
 @bot.event
 async def on_command_error(ctx, error):
