@@ -144,17 +144,22 @@ def patch_bot(bot):
         # Deduplicatorインスタンスを取得
         deduplicator = get_deduplicator()
         
-        # ここで二重にチェック
-        if hasattr(ctx, "_processed") or hasattr(ctx.message, "_processed"):
+        # ここで二重にチェック - メッセージIDで安全に処理
+        message_invoke_key = f"invoke_{message_id}"
+        if message_invoke_key in deduplicator.processed_messages or hasattr(ctx, "_processed"):
             logger.debug(f"重複invokeをスキップ: {message_id}")
             return
         
         # 処理済みとしてマーク
+        deduplicator.processed_messages.add(message_invoke_key)
         setattr(ctx, "_processed", True)
-        setattr(ctx.message, "_processed", True)
         
-        # オリジナルの処理を実行
-        return await original_invoke(ctx)
+        # 安全なオリジナル処理実行
+        try:
+            return await original_invoke(ctx)
+        except Exception as e:
+            logger.error(f"Invoke中にエラー発生: {e}")
+            traceback.print_exc()
     
     # invoke関数を上書き
     bot.invoke = deduplicated_invoke

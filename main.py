@@ -301,44 +301,41 @@ async def on_ready():
         await load_extensions()
         print("すべてのCogの読み込みに成功しました")
         
-        # 直接コマンド登録 - 修正版ハンドラーを使用（重複実行防止）
+        # 直接コマンド登録 - シンプルな重複防止アプローチを使用
         try:
             # コマンド登録済みかどうかを確認するフラグ
-            if not getattr(bot, "_fixed_compose_setup_done", False):
-                # 修正版のComposeハンドラーを設定
-                print("修正版Composeハンドラーを設定します...")
-                
-                # 直接コマンドをインポートして設定
+            if not getattr(bot, "_simple_compose_setup_done", False):
+                # シンプルな重複防止のためのセットアップ
                 import sys
                 from importlib import reload
                 
-                # 念のためモジュールを再読み込み
+                # モジュールを再読み込み
                 if "direct_compose" in sys.modules:
                     reload(sys.modules["direct_compose"])
-                if "fixed_compose_handler" in sys.modules:
-                    reload(sys.modules["fixed_compose_handler"])
+                if "simple_compose_fix" in sys.modules:
+                    reload(sys.modules["simple_compose_fix"])
                 
-                # 修正版ハンドラーを設定
-                from fixed_compose_handler import setup_fixed_compose_handler
-                handler = setup_fixed_compose_handler(bot)
+                # シンプルな修正を適用
+                from simple_compose_fix import setup_compose_commands
+                result = setup_compose_commands(bot)
                 
                 # 登録完了フラグを設定
-                bot._fixed_compose_setup_done = True
-                print(f"修正版Composeハンドラー設定が完了しました: {handler}")
+                bot._simple_compose_setup_done = True
+                print(f"シンプルなCompose修正が完了しました: {result}")
             else:
-                print("修正版Composeハンドラーは既に設定されています")
+                print("シンプルなCompose修正は既に適用済みです")
         except Exception as cmd_error:
-            print(f"Composeハンドラー設定でエラーが発生しました: {cmd_error}")
+            print(f"Compose設定でエラーが発生しました: {cmd_error}")
             traceback.print_exc()
             
-            # エラーが発生した場合は、従来の方法でセットアップを試みる
+            # エラーが発生した場合、最低限の実装でセットアップ
             try:
-                print("従来の方法でのsetup_commandsを試みます...")
+                print("最低限の方法でsetup_commandsを実行します...")
                 from direct_compose import setup_commands
                 setup_commands(bot)
-                print("従来の方法でのsetup_commands成功")
+                print("最低限の方法でのsetup_commands成功")
             except Exception as e:
-                print(f"従来の方法でのsetup_commandsも失敗: {e}")
+                print(f"最低限の方法でのsetup_commandsも失敗: {e}")
                 traceback.print_exc()
     except Exception as e:
         print(f"Cogの読み込み中にエラーが発生しました: {e}")
