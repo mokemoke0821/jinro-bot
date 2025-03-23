@@ -295,24 +295,49 @@ async def on_ready():
         await load_extensions()
         print("すべてのCogの読み込みに成功しました")
         
-        # 最小限の修正によるアプローチ
+        # 最も単純なアプローチを使用
         try:
-            # 全ての複雑な処理をリセットして最小限のシンプルな修正を適用
-            from simple_fix import fix_discord_bot
-            success = fix_discord_bot(bot)
-            print(f"シンプルな修正適用: {success}")
+            # 最も安全なバージョンを使用
+            print("最も安全なバージョンを使用します...")
+            import direct_compose_safe
+            direct_compose_safe.setup_commands(bot)
+            print("安全なバージョン適用成功")
         except Exception as e:
-            print(f"シンプルな修正中にエラー: {e}")
+            print(f"安全なバージョン適用でエラー: {e}")
             traceback.print_exc()
             
-            # 最後の手段
+            # 最終手段（最小限のコード）
             try:
-                print("最終手段を実行: 直接 setup_commands を呼び出し")
-                import direct_compose
-                direct_compose.setup_commands(bot)
-                print("直接setup_commands呼び出し成功")
-            except Exception as e2:
-                print(f"最終手段も失敗: {e2}")
+                print("最終手段を実行: 埋め込みコマンド登録")
+                
+                # 最小限のコードで直接登録
+                @bot.command(name="compose")
+                async def compose_command(ctx, *args):
+                    """最も単純なcomposeコマンド"""
+                    try:
+                        if not args or args[0].lower() == "help":
+                            embed = discord.Embed(
+                                title="役職構成管理",
+                                description="現在機能が制限されています。メンテナンス中です。",
+                                color=discord.Color.blue()
+                            )
+                            await ctx.send(embed=embed)
+                            return
+                            
+                        if args[0].lower() == "presets":
+                            embed = discord.Embed(
+                                title="プリセット一覧",
+                                description="standard, beginner, advanced, chaos",
+                                color=discord.Color.green()
+                            )
+                            await ctx.send(embed=embed)
+                            return
+                    except Exception as cmd_e:
+                        print(f"コマンド実行エラー: {cmd_e}")
+                
+                print("埋め込みコマンド登録完了")
+            except Exception as e3:
+                print(f"埋め込みコマンドも失敗: {e3}")
                 traceback.print_exc()
     except Exception as e:
         print(f"Cogの読み込み中にエラーが発生しました: {e}")
