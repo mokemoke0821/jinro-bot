@@ -288,54 +288,31 @@ async def on_ready():
     print(f'Bot ID: {bot.user.id}')
     
     try:
-        # メッセージ重複防止機能を適用
-        if message_deduplicator:
-            try:
-                message_deduplicator.patch_bot(bot)
-                print("メッセージ重複防止パッチを適用しました")
-            except Exception as e:
-                print(f"メッセージ重複防止パッチの適用に失敗しました: {e}")
-                traceback.print_exc()
+        # 重複防止機能はここでは適用しない（シンプル解決策を使用）
+        print("シンプルな対応策を使用します...")
 
         # Cogを読み込む
         await load_extensions()
         print("すべてのCogの読み込みに成功しました")
         
-        # 直接コマンド登録 - シンプルな重複防止アプローチを使用
+        # 最小限の修正によるアプローチ
         try:
-            # コマンド登録済みかどうかを確認するフラグ
-            if not getattr(bot, "_simple_compose_setup_done", False):
-                # シンプルな重複防止のためのセットアップ
-                import sys
-                from importlib import reload
-                
-                # モジュールを再読み込み
-                if "direct_compose" in sys.modules:
-                    reload(sys.modules["direct_compose"])
-                if "simple_compose_fix" in sys.modules:
-                    reload(sys.modules["simple_compose_fix"])
-                
-                # シンプルな修正を適用
-                from simple_compose_fix import setup_compose_commands
-                result = setup_compose_commands(bot)
-                
-                # 登録完了フラグを設定
-                bot._simple_compose_setup_done = True
-                print(f"シンプルなCompose修正が完了しました: {result}")
-            else:
-                print("シンプルなCompose修正は既に適用済みです")
-        except Exception as cmd_error:
-            print(f"Compose設定でエラーが発生しました: {cmd_error}")
+            # 全ての複雑な処理をリセットして最小限のシンプルな修正を適用
+            from simple_fix import fix_discord_bot
+            success = fix_discord_bot(bot)
+            print(f"シンプルな修正適用: {success}")
+        except Exception as e:
+            print(f"シンプルな修正中にエラー: {e}")
             traceback.print_exc()
             
-            # エラーが発生した場合、最低限の実装でセットアップ
+            # 最後の手段
             try:
-                print("最低限の方法でsetup_commandsを実行します...")
-                from direct_compose import setup_commands
-                setup_commands(bot)
-                print("最低限の方法でのsetup_commands成功")
-            except Exception as e:
-                print(f"最低限の方法でのsetup_commandsも失敗: {e}")
+                print("最終手段を実行: 直接 setup_commands を呼び出し")
+                import direct_compose
+                direct_compose.setup_commands(bot)
+                print("直接setup_commands呼び出し成功")
+            except Exception as e2:
+                print(f"最終手段も失敗: {e2}")
                 traceback.print_exc()
     except Exception as e:
         print(f"Cogの読み込み中にエラーが発生しました: {e}")
